@@ -1,0 +1,948 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>Voxelエディタ with 画像機能フル版</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background-color: #222;
+      color: #fff;
+      overscroll-behavior: none; 
+    }
+    #controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      padding: 10px;
+      background: #333;
+      align-items: center;
+    }
+    #controls button,
+    #controls input[type="color"],
+    #controls input[type="number"],
+    #controls input[type="range"],
+    #controls input[type="file"] {
+      padding: 5px;
+      font-size: 14px;
+      border: none;
+      border-radius: 4px;
+      background-color: #444;
+      color: #fff;
+      cursor: pointer;
+    }
+    #controls button:hover {
+      background-color: #666;
+    }
+    #grid-container {
+      width: 80vw;
+      height: 70vh;
+      overflow: auto; 
+      border: 2px solid #444;
+      margin: 10px;
+      position: relative;
+    }
+    #grid-wrapper {
+      position: relative;
+    }
+    #grid {
+  position: relative; /* これでz-index効くように */
+  z-index: 20; /* 画像より上に表示 */
+  display: grid;
+  touch-action: none;
+}
+
+    .cell {
+      width: 20px;
+      height: 20px;
+      border: 1px solid #555;
+      box-sizing: border-box;
+      position: relative;
+    }
+    .cell-highlight {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(255, 255, 255, 0.2);
+      pointer-events: none;
+    }
+    #renderer-container {
+      display: none;
+      width: 80vw;
+      height: 70vh;
+      margin: 10px;
+      border: 2px solid #444;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    #scrollButtons {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      z-index: 1000;
+    }
+    #scrollButtons button {
+      background-color: #555;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    #scrollButtons button:hover {
+      background-color: #888;
+    }
+    /* 画像表示用 */
+    .overlay-image {
+      position: absolute;
+      opacity: 0.3;
+      pointer-events: none;
+      z-index: 1;
+      user-select: none;
+    }
+    .overlay-image.moving {
+      opacity: 0.5;
+      pointer-events: none;
+      z-index: 10;
+      cursor: move;
+    }
+
+    /* ファイル選択ラベルをボタン風に */
+.custom-file-label {
+  padding: 6px 12px;
+  background-color: #444;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  font-size: 14px;
+  border: none;
+  transition: background-color 0.3s ease;
+}
+
+.custom-file-label:hover {
+  background-color: #666;
+}
+
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <input type="color" id="colorPicker" value="#ff0000" />
+    <button id="drawBtn">描画</button>
+    <button id="eraseBtn">消去</button>
+    <input type="range" id="brushSize" min="1" max="5" value="1" />
+    <span id="brushSizeValue">1</span>
+    <button id="layerPrevBtn">↑</button>
+    <button id="layerNextBtn">↓</button>
+    <span id="layerLabel"></span>
+    <input type="number" id="inputWidth" value="16" min="1" max="64" />
+    <input type="number" id="inputHeight" value="16" min="1" max="64" />
+    <input type="number" id="inputDepth" value="16" min="1" max="64" />
+    <button id="resizeBtn">サイズ変更</button>
+    <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
+    <button id="show2dBtn">2D表示</button>
+    <button id="show3dBtn">3D表示</button>
+    <button id="saveJsonBtn">JSON保存</button>
+    <button id="saveObjBtn">OBJ保存</button>
+    <button id="save3dImageBtn">3D画像保存</button>
+    <input type="file" id="importJsonInput" accept=".json" style="display:none;" />
+<label for="importJsonInput" class="custom-file-label">JSONインポート</label>
+    <div id="scrollButtons">
+      <button id="scrollUp">↑</button>
+      <button id="scrollDown">↓</button>
+      <button id="scrollLeft">←</button>
+      <button id="scrollRight">→</button>
+      <button id="undoBtn">元に戻す</button>
+      <button id="resetBtn">リセット</button>
+    </div>
+
+    <!-- 画像機能 -->
+    <!-- 画像アップロード -->
+<input type="file" id="imageInput" accept="image/*" style="display:none;" />
+<label for="imageInput" class="custom-file-label">画像インポート</label>
+    <input type="number" id="imgWidth" value="100" style="width: 60px;" />×
+    <input type="number" id="imgHeight" value="100" style="width: 60px;" />
+    <button id="applyImageSize">画像サイズ変更</button>
+    <button id="toggleMoveImage">画像移動モード: OFF</button>
+    <button id="deleteImageBtn">画像削除</button>
+  </div>
+
+  <div id="grid-container">
+    <div id="grid-wrapper">
+      <div id="grid"></div>
+    </div>
+  </div>
+
+  <div id="renderer-container">
+    <canvas id="threejs-canvas"></canvas>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+    let width = 16, height = 16, depth = 16;
+    let currentLayer = 0;
+    let drawColor = "#ff0000";
+    let isErasing = false;
+    let isDrawing = false;
+    let brushSize = 1;
+    let voxelData = [];
+    let scene, camera, renderer, controls;
+    let is3DInitialized = false;
+    let voxelMeshes = [];
+
+    let undoStack = [];
+
+    function saveStateForUndo() {
+      const clone = voxelData.map(layer =>
+        layer.map(row =>
+          row.slice()
+        )
+      );
+      undoStack.push(clone);
+      if (undoStack.length > 20) undoStack.shift();
+    }
+
+    function undo() {
+      if (undoStack.length === 0) return;
+      voxelData = undoStack.pop();
+      if (currentLayer >= height) currentLayer = height - 1;
+      renderGrid();
+      updateLayerLabel();
+      if (is3DInitialized) update3DView();
+    }
+
+    const grid = document.getElementById("grid");
+    const layerLabel = document.getElementById("layerLabel");
+    const canvas = document.getElementById("threejs-canvas");
+    const rendererContainer = document.getElementById("renderer-container");
+    const gridContainer = document.getElementById("grid-container");
+    const gridWrapper = document.getElementById("grid-wrapper");
+
+    function initData() {
+      voxelData = Array.from({ length: height }, () =>
+        Array.from({ length: depth }, () =>
+          Array.from({ length: width }, () => null)
+        )
+      );
+    }
+
+// セルDOMを保持する配列をグローバルに用意（renderGridの外で）
+let cells = [];
+
+function initGrid() {
+  grid.innerHTML = "";
+  cells = [];
+
+  grid.style.gridTemplateColumns = `repeat(${width}, 20px)`;
+  grid.style.gridTemplateRows = `repeat(${depth}, 20px)`;
+
+  for (let z = 0; z < depth; z++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.dataset.x = x;
+      cell.dataset.z = z;
+
+      const highlight = document.createElement("div");
+      highlight.className = "cell-highlight";
+      highlight.style.display = "none";
+      cell.appendChild(highlight);
+
+      cell.addEventListener("mouseenter", () => {
+        highlight.style.display = "block";
+      });
+      cell.addEventListener("mouseleave", () => {
+        highlight.style.display = "none";
+      });
+
+      cell.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        if (!isImageMoveMode) {
+          isDrawing = true;
+          paintCells(x, z);
+        }
+      });
+      cell.addEventListener("mousemove", (e) => {
+        if (isDrawing) {
+          e.preventDefault();
+          const targetElement = e.target;
+          if (targetElement && targetElement.classList.contains("cell")) {
+            const moveX = parseInt(targetElement.dataset.x);
+            const moveZ = parseInt(targetElement.dataset.z);
+            paintCells(moveX, moveZ);
+          }
+        }
+      });
+      cell.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (!isImageMoveMode) {
+          isDrawing = true;
+          paintCells(x, z);
+        }
+      }, { passive: false });
+      cell.addEventListener("touchmove", (e) => {
+        if (isDrawing) {
+          e.preventDefault();
+          let targetElement;
+          if (e.touches) {
+            const touch = e.touches[0];
+            targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+          } else {
+            targetElement = e.target;
+          }
+          if (targetElement && targetElement.classList.contains("cell")) {
+            const moveX = parseInt(targetElement.dataset.x);
+            const moveZ = parseInt(targetElement.dataset.z);
+            paintCells(moveX, moveZ);
+          }
+        }
+      }, { passive: false });
+
+      grid.appendChild(cell);
+      row.push(cell);
+    }
+    cells.push(row);
+  }
+}
+
+function updateGridColors() {
+  for (let z = 0; z < depth; z++) {
+    for (let x = 0; x < width; x++) {
+      const color = voxelData[currentLayer][z][x];
+      cells[z][x].style.backgroundColor = color ?? "transparent";
+    }
+  }
+}
+
+function renderGrid() {
+  // まだセルがない、またはサイズが変わった時だけ新しく作る
+  if (cells.length === 0 || cells.length !== depth || (cells[0] && cells[0].length !== width)) {
+    initGrid();
+  }
+  // セルはあるので色だけ更新する
+  updateGridColors();
+  updateImagePositionAndLayer();
+}
+
+    function paintCells(centerX, centerZ) {
+      saveStateForUndo();
+      const halfSize = Math.floor(brushSize / 2);
+      for (let zOffset = -halfSize; zOffset <= halfSize; zOffset++) {
+        for (let xOffset = -halfSize; xOffset <= halfSize; xOffset++) {
+          const x = centerX + xOffset;
+          const z = centerZ + zOffset;
+
+          if (x >= 0 && x < width && z >= 0 && z < depth) {
+            voxelData[currentLayer][z][x] = isErasing ? null : drawColor;
+          }
+        }
+      }
+
+      renderGrid();
+      if (is3DInitialized && rendererContainer.style.display === 'block') {
+        update3DView();
+      }
+    }
+
+    function updateLayerLabel() {
+      layerLabel.textContent = `レイヤー: ${currentLayer + 1} / ${height}`;
+    }
+
+    function init3DView() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+
+  camera = new THREE.PerspectiveCamera(75, rendererContainer.clientWidth / rendererContainer.clientHeight, 0.1, 1000);
+  camera.position.set(width, height, depth);
+
+  renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.target.set(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(50, 50, 50);
+  scene.add(dirLight);
+
+  // ここで一度レンダラーサイズとカメラアスペクト比を強制的に最新のサイズに
+  requestAnimationFrame(() => {
+    renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
+    camera.aspect = rendererContainer.clientWidth / rendererContainer.clientHeight;
+    camera.updateProjectionMatrix();
+    animate();
+  });
+
+  is3DInitialized = true;
+  update3DView();
+  animate();
+}
+
+function update3DView() {
+  voxelMeshes.forEach(m => scene.remove(m));
+  voxelMeshes = [];
+
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const centerOffsetX = (width - 1) / 2;
+  const centerOffsetY = (height - 1) / 2;
+  const centerOffsetZ = (depth - 1) / 2;
+
+  let meshCount = 0;
+  for (let y = 0; y < height; y++) {
+    for (let z = 0; z < depth; z++) {
+      for (let x = 0; x < width; x++) {
+        const color = voxelData[y][z][x];
+        if (color) {
+          const material = new THREE.MeshPhongMaterial({ color });
+          const cube = new THREE.Mesh(geometry, material);
+          cube.position.set(x - centerOffsetX, y - centerOffsetY, z - centerOffsetZ);
+          scene.add(cube);
+          voxelMeshes.push(cube);
+          meshCount++;
+        }
+      }
+    }
+  }
+}
+
+let lastAnimateLog = 0;
+function animate(time) {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+
+  if (!lastAnimateLog || time - lastAnimateLog > 1000) {
+    lastAnimateLog = time;
+  }
+}
+
+
+    function saveJSON() {
+      const data = {
+        width, height, depth,
+        voxelData
+      };
+      const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "voxel_data.json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function saveOBJ() {
+      const zip = new JSZip();
+      let obj = "mtllib model.mtl\n";
+      let mtl = "";
+
+      const vertexMap = new Map();
+      const vertices = [];
+      let currentIndex = 1;
+
+      const facesByMaterial = {};
+      const materialSet = new Set();
+
+      const scale = 1.0; // 1ユニットそのまま使うなら1.0
+
+      function getVertexIndex(x, y, z) {
+        const key = `${x},${y},${z}`;
+        if (vertexMap.has(key)) {
+          return vertexMap.get(key);
+        }
+        vertexMap.set(key, currentIndex);
+        vertices.push(`v ${x * scale} ${y * scale} ${z * scale}`);
+        return currentIndex++;
+      }
+
+      function rgbFromHex(hex) {
+        const value = parseInt(hex.slice(1), 16);
+        const r = ((value >> 16) & 0xff) / 255;
+        const g = ((value >> 8) & 0xff) / 255;
+        const b = (value & 0xff) / 255;
+        return { r, g, b };
+      }
+
+      function addFace(v1, v2, v3, v4, matName) {
+        if (!facesByMaterial[matName]) {
+          facesByMaterial[matName] = [];
+        }
+        facesByMaterial[matName].push(`f ${v1} ${v2} ${v3} ${v4}`);
+      }
+
+      for (let y = 0; y < height; y++) {
+        for (let z = 0; z < depth; z++) {
+          for (let x = 0; x < width; x++) {
+            const color = voxelData[y][z][x];
+            if (!color) continue;
+
+            const matName = "mat_" + color.slice(1);
+            if (!materialSet.has(matName)) {
+              materialSet.add(matName);
+              const { r, g, b } = rgbFromHex(color);
+              mtl += `newmtl ${matName}\nKd ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\n\n`;
+            }
+
+            // 各面の頂点取得
+            const px = x, py = y, pz = z;
+
+            const v000 = getVertexIndex(px, py, pz);
+            const v100 = getVertexIndex(px + 1, py, pz);
+            const v010 = getVertexIndex(px, py + 1, pz);
+            const v110 = getVertexIndex(px + 1, py + 1, pz);
+            const v001 = getVertexIndex(px, py, pz + 1);
+            const v101 = getVertexIndex(px + 1, py, pz + 1);
+            const v011 = getVertexIndex(px, py + 1, pz + 1);
+            const v111 = getVertexIndex(px + 1, py + 1, pz + 1);
+
+            // 面を追加（面の順番に注意）
+            if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) { // 上
+              addFace(v011, v111, v110, v010, matName);
+            }
+            if (y === 0 || !voxelData[y - 1]?.[z]?.[x]) { // 下
+              addFace(v000, v100, v101, v001, matName);
+            }
+            if (x === width - 1 || !voxelData[y]?.[z]?.[x + 1]) { // 右
+              addFace(v100, v110, v111, v101, matName);
+            }
+            if (x === 0 || !voxelData[y]?.[z]?.[x - 1]) { // 左
+              addFace(v001, v011, v010, v000, matName);
+            }
+            if (z === depth - 1 || !voxelData[y]?.[z + 1]?.[x]) { // 前
+              addFace(v001, v101, v111, v011, matName);
+            }
+            if (z === 0 || !voxelData[y]?.[z - 1]?.[x]) { // 後ろ
+              addFace(v100, v000, v010, v110, matName);
+            }
+          }
+        }
+      }
+
+      obj += vertices.join('\n') + '\n';
+      for (const matName in facesByMaterial) {
+        obj += `usemtl ${matName}\n`;
+        obj += facesByMaterial[matName].join('\n') + '\n';
+      }
+
+      zip.file("model.obj", obj);
+      zip.file("model.mtl", mtl);
+      zip.generateAsync({ type: "blob" }).then(blob => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "voxel_model.zip";
+        a.click();
+        URL.revokeObjectURL(url);
+      });
+    }
+
+    // 画像関係の変数
+    let overlayImage = null;  // <img>要素
+    let isImageMoveMode = false;
+    let imageOffsetX = 0;
+    let imageOffsetY = 0;
+    let dragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    let imgStartLeft = 0;
+    let imgStartTop = 0;
+
+    // 画像アップロード
+    const imageInput = document.getElementById('imageInput');
+    const imgWidthInput = document.getElementById('imgWidth');
+    const imgHeightInput = document.getElementById('imgHeight');
+    const applyImageSizeBtn = document.getElementById('applyImageSize');
+    const toggleMoveImageBtn = document.getElementById('toggleMoveImage');
+    const deleteImageBtn = document.getElementById('deleteImageBtn');
+
+    imageInput.addEventListener('change', (e) => {
+      if (!e.target.files || e.target.files.length === 0) return;
+
+      const file = e.target.files[0];
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        if (overlayImage) {
+          overlayImage.remove();
+          overlayImage = null;
+        }
+
+        overlayImage = document.createElement('img');
+        overlayImage.src = reader.result;
+        overlayImage.className = 'overlay-image';
+        overlayImage.style.width = imgWidthInput.value + 'px';
+        overlayImage.style.height = imgHeightInput.value + 'px';
+
+        // 初期位置はグリッド左上に
+        overlayImage.style.left = '0px';
+        overlayImage.style.top = '0px';
+
+        gridWrapper.appendChild(overlayImage);
+        updateImagePositionAndLayer();
+      };
+      reader.readAsDataURL(file);
+      imageInput.value = ''; // 同じ画像選んだ時も発火させるためにクリア
+    });
+
+    // 画像サイズ変更
+    applyImageSizeBtn.addEventListener('click', () => {
+      if (!overlayImage) return;
+      let w = parseInt(imgWidthInput.value);
+      let h = parseInt(imgHeightInput.value);
+      if (isNaN(w) || w < 1) w = 100;
+      if (isNaN(h) || h < 1) h = 100;
+      overlayImage.style.width = w + 'px';
+      overlayImage.style.height = h + 'px';
+    });
+
+    // 画像移動モード切替
+    toggleMoveImageBtn.addEventListener('click', () => {
+      if (!overlayImage) return;
+
+      isImageMoveMode = !isImageMoveMode;
+      if (isImageMoveMode) {
+        toggleMoveImageBtn.textContent = "画像移動モード: ON";
+        overlayImage.classList.add('moving');
+        // 画像をマス目の上（z-index 高く）に
+        overlayImage.style.zIndex = 25;
+        overlayImage.style.opacity = '1.0';
+        overlayImage.style.pointerEvents = 'auto';
+        overlayImage.style.cursor = 'move';
+      } else {
+        toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+        overlayImage.classList.remove('moving');
+        // 画像をマス目の下（透明度0.3、pointer-events:none）
+        overlayImage.style.zIndex = 1;
+        overlayImage.style.opacity = '0.3';
+        overlayImage.style.pointerEvents = 'none';
+        overlayImage.style.cursor = 'default';
+      }
+    });
+
+    // 画像削除ボタン
+    deleteImageBtn.addEventListener('click', () => {
+      if (overlayImage) {
+        overlayImage.remove();
+        overlayImage = null;
+        isImageMoveMode = false;
+        toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+      }
+    });
+
+    // 画像ドラッグイベント（移動モード中のみ）
+    gridWrapper.addEventListener('mousedown', (e) => {
+      if (!isImageMoveMode || !overlayImage) return;
+      if (e.target !== overlayImage) return;
+
+      dragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+      imgStartLeft = parseInt(overlayImage.style.left) || 0;
+      imgStartTop = parseInt(overlayImage.style.top) || 0;
+      e.preventDefault();
+    });
+    window.addEventListener('mousemove', (e) => {
+      if (!dragging || !overlayImage) return;
+      if (!isImageMoveMode) return;
+
+      const dx = e.clientX - dragStartX;
+      const dy = e.clientY - dragStartY;
+      let newLeft = imgStartLeft + dx;
+      let newTop = imgStartTop + dy;
+
+      // グリッド範囲内に制限（オーバーフローOKならこの制限外してもいい）
+      const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
+      const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
+      newLeft = Math.min(Math.max(0, newLeft), maxLeft);
+      newTop = Math.min(Math.max(0, newTop), maxTop);
+
+      overlayImage.style.left = newLeft + "px";
+      overlayImage.style.top = newTop + "px";
+    });
+    window.addEventListener('mouseup', (e) => {
+      if (dragging) {
+        dragging = false;
+      }
+    });
+
+    // タッチ対応ドラッグ
+    gridWrapper.addEventListener('touchstart', (e) => {
+      if (!isImageMoveMode || !overlayImage) return;
+      if (e.target !== overlayImage) return;
+
+      dragging = true;
+      const touch = e.touches[0];
+      dragStartX = touch.clientX;
+      dragStartY = touch.clientY;
+      imgStartLeft = parseInt(overlayImage.style.left) || 0;
+      imgStartTop = parseInt(overlayImage.style.top) || 0;
+      e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('touchmove', (e) => {
+      if (!dragging || !overlayImage) return;
+      if (!isImageMoveMode) return;
+
+      const touch = e.touches[0];
+      const dx = touch.clientX - dragStartX;
+      const dy = touch.clientY - dragStartY;
+      let newLeft = imgStartLeft + dx;
+      let newTop = imgStartTop + dy;
+
+      const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
+      const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
+      newLeft = Math.min(Math.max(0, newLeft), maxLeft);
+      newTop = Math.min(Math.max(0, newTop), maxTop);
+
+      overlayImage.style.left = newLeft + "px";
+      overlayImage.style.top = newTop + "px";
+
+      e.preventDefault();
+    }, { passive: false });
+    window.addEventListener('touchend', () => {
+      dragging = false;
+    });
+
+    // 画像位置とレイヤー管理
+    // 移動モード中は画像をマス目の上、非移動中はマス目の下
+    function updateImagePositionAndLayer() {
+      if (!overlayImage) return;
+
+      if (isImageMoveMode) {
+        overlayImage.style.zIndex = 10;
+        overlayImage.style.opacity = '1.0';
+        overlayImage.style.pointerEvents = 'auto';
+      } else {
+        overlayImage.style.zIndex = 1;
+        overlayImage.style.opacity = '0.3';
+        overlayImage.style.pointerEvents = 'none';
+      }
+    }
+
+    // リセット時に画像も消す処理を追加
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      if (confirm("本当にリセットする？未保存のデータは消えるよ？")) {
+        saveStateForUndo();
+        initData();
+        currentLayer = 0;
+        updateLayerLabel();
+        renderGrid();
+        if (is3DInitialized) update3DView();
+        // 画像も消す
+        if (overlayImage) {
+          overlayImage.remove();
+          overlayImage = null;
+          isImageMoveMode = false;
+          toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+        }
+      }
+    });
+
+    // 他のイベント登録（色変更・描画モード切替など）
+    document.getElementById("colorPicker").addEventListener("input", e => {
+      drawColor = e.target.value;
+      isErasing = false;
+    });
+    document.getElementById("drawBtn").addEventListener("click", () => {
+      isErasing = false;
+    });
+    document.getElementById("eraseBtn").addEventListener("click", () => {
+      isErasing = true;
+    });
+    document.getElementById("brushSize").addEventListener("input", e => {
+      brushSize = parseInt(e.target.value);
+      document.getElementById("brushSizeValue").textContent = brushSize;
+    });
+
+    document.getElementById("layerPrevBtn").addEventListener("click", () => {
+      if (currentLayer > 0) currentLayer--;
+      updateLayerLabel();
+      renderGrid();
+    });
+    document.getElementById("layerNextBtn").addEventListener("click", () => {
+      if (currentLayer < height - 1) currentLayer++;
+      updateLayerLabel();
+      renderGrid();
+    });
+
+    document.getElementById("resizeBtn").addEventListener("click", () => {
+      const newW = parseInt(document.getElementById("inputWidth").value);
+      const newH = parseInt(document.getElementById("inputHeight").value);
+      const newD = parseInt(document.getElementById("inputDepth").value);
+      if (newW > 0 && newH > 0 && newD > 0) {
+        saveStateForUndo();
+        resizeVoxelData(newW, newH, newD);
+        width = newW; height = newH; depth = newD;
+        if (currentLayer >= height) currentLayer = height - 1;
+        updateLayerLabel();
+        renderGrid();
+        if (is3DInitialized) update3DView();
+      }
+    });
+
+    document.getElementById("copyLayerAddBtn").addEventListener("click", () => {
+      saveStateForUndo();
+      const copyLayer = voxelData[currentLayer].map(row => row.slice());
+      voxelData.splice(currentLayer + 1, 0, copyLayer);
+      height++;
+      if (currentLayer < height - 1) currentLayer++;
+      document.getElementById("inputHeight").value = height;
+      updateLayerLabel();
+      renderGrid();
+      if (is3DInitialized) update3DView();
+    });
+
+    document.getElementById("show2dBtn").addEventListener("click", () => {
+      rendererContainer.style.display = "none";
+      gridContainer.style.display = "block";
+    });
+    document.getElementById("show3dBtn").addEventListener("click", () => {
+      if (!is3DInitialized) {
+        init3DView();
+      }
+      rendererContainer.style.display = "block";
+      gridContainer.style.display = "none";
+      update3DView();
+    });
+
+    document.getElementById("saveJsonBtn").addEventListener("click", saveJSON);
+    document.getElementById("saveObjBtn").addEventListener("click", saveOBJ);
+    document.getElementById("undoBtn").addEventListener("click", undo);
+
+    document.getElementById("scrollUp").addEventListener("click", () => {
+      gridContainer.scrollBy(0, -50);
+    });
+    document.getElementById("scrollDown").addEventListener("click", () => {
+      gridContainer.scrollBy(0, 50);
+    });
+    document.getElementById("scrollLeft").addEventListener("click", () => {
+      gridContainer.scrollBy(-50, 0);
+    });
+    document.getElementById("scrollRight").addEventListener("click", () => {
+      gridContainer.scrollBy(50, 0);
+    });
+
+document.getElementById("save3dImageBtn").addEventListener("click", () => {
+  if (!is3DInitialized) return;
+
+  // 描画を一度強制してから保存（念のため）
+  renderer.render(scene, camera);
+
+  // 画像化
+  const dataURL = renderer.domElement.toDataURL("image/png");
+
+  // ダウンロード処理
+  const a = document.createElement("a");
+  a.href = dataURL;
+  a.download = `voxel_3dview.png`;
+  a.click();
+});
+
+const importJsonInput = document.getElementById('importJsonInput');
+
+importJsonInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+
+      if (
+        typeof data.width === 'number' &&
+        typeof data.height === 'number' &&
+        typeof data.depth === 'number' &&
+        Array.isArray(data.voxelData)
+      ) {
+        width = data.width;
+        height = data.height;
+        depth = data.depth;
+        voxelData = data.voxelData;
+
+        // UIのサイズも更新
+        document.getElementById("inputWidth").value = width;
+        document.getElementById("inputHeight").value = height;
+        document.getElementById("inputDepth").value = depth;
+
+        currentLayer = 0;
+        updateLayerLabel();
+        renderGrid();
+        if (is3DInitialized) update3DView();
+      } else {
+        alert("不正なJSONデータです。");
+      }
+    } catch (err) {
+      alert("JSONの読み込みに失敗しました。");
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
+
+  // 選択クリア
+  importJsonInput.value = "";
+});
+
+
+    // データのリサイズ関数
+    function resizeVoxelData(newW, newH, newD) {
+      const newData = Array.from({ length: newH }, () =>
+        Array.from({ length: newD }, () =>
+          Array.from({ length: newW }, () => null)
+        )
+      );
+
+      for (let y = 0; y < Math.min(height, newH); y++) {
+        for (let z = 0; z < Math.min(depth, newD); z++) {
+          for (let x = 0; x < Math.min(width, newW); x++) {
+            newData[y][z][x] = voxelData[y][z][x];
+          }
+        }
+      }
+      voxelData = newData;
+    }
+
+    // 初期化
+    initData();
+    updateLayerLabel();
+    renderGrid();
+
+    window.addEventListener('resize', () => {
+      if (is3DInitialized) {
+        renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
+        camera.aspect = rendererContainer.clientWidth / rendererContainer.clientHeight;
+        camera.updateProjectionMatrix();
+      }
+    });
+  </script>
+</body>
+</html>
