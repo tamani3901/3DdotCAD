@@ -47,11 +47,12 @@
       position: relative;
     }
     #grid {
-      position: relative;
-      z-index: 20;
-      display: grid;
-      touch-action: none;
-    }
+  position: relative; /* これでz-index効くように */
+  z-index: 20; /* 画像より上に表示 */
+  display: grid;
+  touch-action: none;
+}
+
     .cell {
       width: 20px;
       height: 20px;
@@ -101,6 +102,7 @@
     #scrollButtons button:hover {
       background-color: #888;
     }
+    /* 画像表示用 */
     .overlay-image {
       position: absolute;
       opacity: 0.3;
@@ -114,21 +116,25 @@
       z-index: 10;
       cursor: move;
     }
-    .custom-file-label {
-      padding: 6px 12px;
-      background-color: #444;
-      color: #fff;
-      border-radius: 4px;
-      cursor: pointer;
-      user-select: none;
-      display: inline-block;
-      font-size: 14px;
-      border: none;
-      transition: background-color 0.3s ease;
-    }
-    .custom-file-label:hover {
-      background-color: #666;
-    }
+
+    /* ファイル選択ラベルをボタン風に */
+.custom-file-label {
+  padding: 6px 12px;
+  background-color: #444;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+  user-select: none;
+  display: inline-block;
+  font-size: 14px;
+  border: none;
+  transition: background-color 0.3s ease;
+}
+
+.custom-file-label:hover {
+  background-color: #666;
+}
+
   </style>
 </head>
 <body>
@@ -151,9 +157,8 @@
     <button id="saveJsonBtn">JSON保存</button>
     <button id="saveObjBtn">OBJ保存</button>
     <button id="save3dImageBtn">3D画像保存</button>
-    <button id="exportLayerObjBtn">レイヤーをOBJに変換</button>
     <input type="file" id="importJsonInput" accept=".json" style="display:none;" />
-    <label for="importJsonInput" class="custom-file-label">JSONインポート</label>
+<label for="importJsonInput" class="custom-file-label">JSONインポート</label>
     <div id="scrollButtons">
       <button id="scrollUp">↑</button>
       <button id="scrollDown">↓</button>
@@ -162,26 +167,41 @@
       <button id="undoBtn">元に戻す</button>
       <button id="resetBtn">リセット</button>
     </div>
-    <input type="file" id="imageInput" accept="image/*" style="display:none;" />
-    <label for="imageInput" class="custom-file-label">画像インポート</label>
+
+    <!-- 画像機能 -->
+    <!-- 画像アップロード -->
+<input type="file" id="imageInput" accept="image/*" style="display:none;" />
+<label for="imageInput" class="custom-file-label">画像インポート</label>
     <input type="number" id="imgWidth" value="100" style="width: 60px;" />×
     <input type="number" id="imgHeight" value="100" style="width: 60px;" />
     <button id="applyImageSize">画像サイズ変更</button>
     <button id="toggleMoveImage">画像移動モード: OFF</button>
     <button id="deleteImageBtn">画像削除</button>
   </div>
+
   <div id="grid-container">
     <div id="grid-wrapper">
       <div id="grid"></div>
     </div>
   </div>
+
   <div id="renderer-container">
     <canvas id="threejs-canvas"></canvas>
   </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/"
+      }
+    }
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
   <script type="module">
-    import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.module.js';
-    import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.154.0/examples/jsm/controls/OrbitControls.js';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
     let width = 16, height = 16, depth = 16;
     let currentLayer = 0;
@@ -193,7 +213,9 @@
     let scene, camera, renderer, controls;
     let is3DInitialized = false;
     let voxelMeshes = [];
+
     let undoStack = [];
+
     function saveStateForUndo() {
       const clone = voxelData.map(layer =>
         layer.map(row =>
@@ -203,6 +225,7 @@
       undoStack.push(clone);
       if (undoStack.length > 20) undoStack.shift();
     }
+
     function undo() {
       if (undoStack.length === 0) return;
       voxelData = undoStack.pop();
@@ -211,12 +234,14 @@
       updateLayerLabel();
       if (is3DInitialized) update3DView();
     }
+
     const grid = document.getElementById("grid");
     const layerLabel = document.getElementById("layerLabel");
     const canvas = document.getElementById("threejs-canvas");
     const rendererContainer = document.getElementById("renderer-container");
     const gridContainer = document.getElementById("grid-container");
     const gridWrapper = document.getElementById("grid-wrapper");
+
     function initData() {
       voxelData = Array.from({ length: height }, () =>
         Array.from({ length: depth }, () =>
@@ -224,92 +249,106 @@
         )
       );
     }
-    let cells = [];
-    function initGrid() {
-      grid.innerHTML = "";
-      cells = [];
-      grid.style.gridTemplateColumns = `repeat(${width}, 20px)`;
-      grid.style.gridTemplateRows = `repeat(${depth}, 20px)`;
-      for (let z = 0; z < depth; z++) {
-        const row = [];
-        for (let x = 0; x < width; x++) {
-          const cell = document.createElement("div");
-          cell.className = "cell";
-          cell.dataset.x = x;
-          cell.dataset.z = z;
-          const highlight = document.createElement("div");
-          highlight.className = "cell-highlight";
-          highlight.style.display = "none";
-          cell.appendChild(highlight);
-          cell.addEventListener("mouseenter", () => {
-            highlight.style.display = "block";
-          });
-          cell.addEventListener("mouseleave", () => {
-            highlight.style.display = "none";
-          });
-          cell.addEventListener("mousedown", (e) => {
-            e.preventDefault();
-            if (!isImageMoveMode) {
-              isDrawing = true;
-              paintCells(x, z);
-            }
-          });
-          cell.addEventListener("mousemove", (e) => {
-            if (isDrawing) {
-              e.preventDefault();
-              const targetElement = e.target;
-              if (targetElement && targetElement.classList.contains("cell")) {
-                const moveX = parseInt(targetElement.dataset.x);
-                const moveZ = parseInt(targetElement.dataset.z);
-                paintCells(moveX, moveZ);
-              }
-            }
-          });
-          cell.addEventListener("touchstart", (e) => {
-            e.preventDefault();
-            if (!isImageMoveMode) {
-              isDrawing = true;
-              paintCells(x, z);
-            }
-          }, { passive: false });
-          cell.addEventListener("touchmove", (e) => {
-            if (isDrawing) {
-              e.preventDefault();
-              let targetElement;
-              if (e.touches) {
-                const touch = e.touches[0];
-                targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
-              } else {
-                targetElement = e.target;
-              }
-              if (targetElement && targetElement.classList.contains("cell")) {
-                const moveX = parseInt(targetElement.dataset.x);
-                const moveZ = parseInt(targetElement.dataset.z);
-                paintCells(moveX, moveZ);
-              }
-            }
-          }, { passive: false });
-          grid.appendChild(cell);
-          row.push(cell);
+
+// セルDOMを保持する配列をグローバルに用意（renderGridの外で）
+let cells = [];
+
+function initGrid() {
+  grid.innerHTML = "";
+  cells = [];
+
+  grid.style.gridTemplateColumns = `repeat(${width}, 20px)`;
+  grid.style.gridTemplateRows = `repeat(${depth}, 20px)`;
+
+  for (let z = 0; z < depth; z++) {
+    const row = [];
+    for (let x = 0; x < width; x++) {
+      const cell = document.createElement("div");
+      cell.className = "cell";
+      cell.dataset.x = x;
+      cell.dataset.z = z;
+
+      const highlight = document.createElement("div");
+      highlight.className = "cell-highlight";
+      highlight.style.display = "none";
+      cell.appendChild(highlight);
+
+      cell.addEventListener("mouseenter", () => {
+        highlight.style.display = "block";
+      });
+      cell.addEventListener("mouseleave", () => {
+        highlight.style.display = "none";
+      });
+
+      cell.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        if (!isImageMoveMode) {
+          isDrawing = true;
+          paintCells(x, z);
         }
-        cells.push(row);
-      }
-    }
-    function updateGridColors() {
-      for (let z = 0; z < depth; z++) {
-        for (let x = 0; x < width; x++) {
-          const color = voxelData[currentLayer][z][x];
-          cells[z][x].style.backgroundColor = color ?? "transparent";
+      });
+      cell.addEventListener("mousemove", (e) => {
+        if (isDrawing) {
+          e.preventDefault();
+          const targetElement = e.target;
+          if (targetElement && targetElement.classList.contains("cell")) {
+            const moveX = parseInt(targetElement.dataset.x);
+            const moveZ = parseInt(targetElement.dataset.z);
+            paintCells(moveX, moveZ);
+          }
         }
-      }
+      });
+      cell.addEventListener("touchstart", (e) => {
+        e.preventDefault();
+        if (!isImageMoveMode) {
+          isDrawing = true;
+          paintCells(x, z);
+        }
+      }, { passive: false });
+      cell.addEventListener("touchmove", (e) => {
+        if (isDrawing) {
+          e.preventDefault();
+          let targetElement;
+          if (e.touches) {
+            const touch = e.touches[0];
+            targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+          } else {
+            targetElement = e.target;
+          }
+          if (targetElement && targetElement.classList.contains("cell")) {
+            const moveX = parseInt(targetElement.dataset.x);
+            const moveZ = parseInt(targetElement.dataset.z);
+            paintCells(moveX, moveZ);
+          }
+        }
+      }, { passive: false });
+
+      grid.appendChild(cell);
+      row.push(cell);
     }
-    function renderGrid() {
-      if (cells.length === 0 || cells.length !== depth || (cells[0] && cells[0].length !== width)) {
-        initGrid();
-      }
-      updateGridColors();
-      updateImagePositionAndLayer();
+    cells.push(row);
+  }
+}
+
+function updateGridColors() {
+  for (let z = 0; z < depth; z++) {
+    for (let x = 0; x < width; x++) {
+      const color = voxelData[currentLayer][z][x];
+      cells[z][x].style.backgroundColor = color ?? "transparent";
     }
+  }
+}
+
+function renderGrid() {
+  // まだセルがない、またはサイズが変わった時だけ新しく作る
+  if (cells.length === 0 || cells.length !== depth || (cells[0] && cells[0].length !== width)) {
+    initGrid();
+  }
+  // セルはあるので色だけ更新する
+  updateGridColors();
+  updateImagePositionAndLayer();
+}
+
     function paintCells(centerX, centerZ) {
       saveStateForUndo();
       const halfSize = Math.floor(brushSize / 2);
@@ -317,78 +356,97 @@
         for (let xOffset = -halfSize; xOffset <= halfSize; xOffset++) {
           const x = centerX + xOffset;
           const z = centerZ + zOffset;
+
           if (x >= 0 && x < width && z >= 0 && z < depth) {
             voxelData[currentLayer][z][x] = isErasing ? null : drawColor;
           }
         }
       }
+
       renderGrid();
       if (is3DInitialized && rendererContainer.style.display === 'block') {
         update3DView();
       }
     }
+
     function updateLayerLabel() {
       layerLabel.textContent = `レイヤー: ${currentLayer + 1} / ${height}`;
     }
+
     function init3DView() {
-      scene = new THREE.Scene();
-      scene.background = new THREE.Color(0x222222);
-      camera = new THREE.PerspectiveCamera(75, rendererContainer.clientWidth / rendererContainer.clientHeight, 0.1, 1000);
-      camera.position.set(width, height, depth);
-      renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
-      renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
-      renderer.setPixelRatio(window.devicePixelRatio);
-      controls = new OrbitControls(camera, renderer.domElement);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.1;
-      controls.target.set(0, 0, 0);
-      scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-      const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      dirLight.position.set(50, 50, 50);
-      scene.add(dirLight);
-      requestAnimationFrame(() => {
-        renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
-        camera.aspect = rendererContainer.clientWidth / rendererContainer.clientHeight;
-        camera.updateProjectionMatrix();
-        animate();
-      });
-      is3DInitialized = true;
-      update3DView();
-      animate();
-    }
-    function update3DView() {
-      voxelMeshes.forEach(m => scene.remove(m));
-      voxelMeshes = [];
-      const geometry = new THREE.BoxGeometry(1, 1, 1);
-      const centerOffsetX = (width - 1) / 2;
-      const centerOffsetY = (height - 1) / 2;
-      const centerOffsetZ = (depth - 1) / 2;
-      let meshCount = 0;
-      for (let y = 0; y < height; y++) {
-        for (let z = 0; z < depth; z++) {
-          for (let x = 0; x < width; x++) {
-            const color = voxelData[y][z][x];
-            if (color) {
-              const material = new THREE.MeshPhongMaterial({ color });
-              const cube = new THREE.Mesh(geometry, material);
-              cube.position.set(x - centerOffsetX, y - centerOffsetY, z - centerOffsetZ);
-              scene.add(cube);
-              voxelMeshes.push(cube);
-              meshCount++;
-            }
-          }
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x222222);
+
+  camera = new THREE.PerspectiveCamera(75, rendererContainer.clientWidth / rendererContainer.clientHeight, 0.1, 1000);
+  camera.position.set(width, height, depth);
+
+  renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+  renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
+  renderer.setPixelRatio(window.devicePixelRatio);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.target.set(0, 0, 0);
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+  const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.position.set(50, 50, 50);
+  scene.add(dirLight);
+
+  // ここで一度レンダラーサイズとカメラアスペクト比を強制的に最新のサイズに
+  requestAnimationFrame(() => {
+    renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
+    camera.aspect = rendererContainer.clientWidth / rendererContainer.clientHeight;
+    camera.updateProjectionMatrix();
+    animate();
+  });
+
+  is3DInitialized = true;
+  update3DView();
+  animate();
+}
+
+function update3DView() {
+  voxelMeshes.forEach(m => scene.remove(m));
+  voxelMeshes = [];
+
+  const geometry = new THREE.BoxGeometry(1, 1, 1);
+  const centerOffsetX = (width - 1) / 2;
+  const centerOffsetY = (height - 1) / 2;
+  const centerOffsetZ = (depth - 1) / 2;
+
+  let meshCount = 0;
+  for (let y = 0; y < height; y++) {
+    for (let z = 0; z < depth; z++) {
+      for (let x = 0; x < width; x++) {
+        const color = voxelData[y][z][x];
+        if (color) {
+          const material = new THREE.MeshPhongMaterial({ color });
+          const cube = new THREE.Mesh(geometry, material);
+          cube.position.set(x - centerOffsetX, y - centerOffsetY, z - centerOffsetZ);
+          scene.add(cube);
+          voxelMeshes.push(cube);
+          meshCount++;
         }
       }
     }
-    let lastAnimateLog = 0;
-    function animate(time) {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-      if (!lastAnimateLog || time - lastAnimateLog > 1000) {
-        lastAnimateLog = time;
-      }
-    }
+  }
+}
+
+let lastAnimateLog = 0;
+function animate(time) {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+
+  if (!lastAnimateLog || time - lastAnimateLog > 1000) {
+    lastAnimateLog = time;
+  }
+}
+
+
     function saveJSON() {
       const data = {
         width, height, depth,
@@ -402,16 +460,21 @@
       a.click();
       URL.revokeObjectURL(url);
     }
+
     function saveOBJ() {
       const zip = new JSZip();
       let obj = "mtllib model.mtl\n";
       let mtl = "";
+
       const vertexMap = new Map();
       const vertices = [];
       let currentIndex = 1;
+
       const facesByMaterial = {};
       const materialSet = new Set();
-      const scale = 1.0;
+
+      const scale = 1.0; // 1ユニットそのまま使うなら1.0
+
       function getVertexIndex(x, y, z) {
         const key = `${x},${y},${z}`;
         if (vertexMap.has(key)) {
@@ -421,6 +484,7 @@
         vertices.push(`v ${x * scale} ${y * scale} ${z * scale}`);
         return currentIndex++;
       }
+
       function rgbFromHex(hex) {
         const value = parseInt(hex.slice(1), 16);
         const r = ((value >> 16) & 0xff) / 255;
@@ -428,24 +492,30 @@
         const b = (value & 0xff) / 255;
         return { r, g, b };
       }
+
       function addFace(v1, v2, v3, v4, matName) {
         if (!facesByMaterial[matName]) {
           facesByMaterial[matName] = [];
         }
         facesByMaterial[matName].push(`f ${v1} ${v2} ${v3} ${v4}`);
       }
+
       for (let y = 0; y < height; y++) {
         for (let z = 0; z < depth; z++) {
           for (let x = 0; x < width; x++) {
             const color = voxelData[y][z][x];
             if (!color) continue;
+
             const matName = "mat_" + color.slice(1);
             if (!materialSet.has(matName)) {
               materialSet.add(matName);
               const { r, g, b } = rgbFromHex(color);
               mtl += `newmtl ${matName}\nKd ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\n\n`;
             }
+
+            // 各面の頂点取得
             const px = x, py = y, pz = z;
+
             const v000 = getVertexIndex(px, py, pz);
             const v100 = getVertexIndex(px + 1, py, pz);
             const v010 = getVertexIndex(px, py + 1, pz);
@@ -454,32 +524,36 @@
             const v101 = getVertexIndex(px + 1, py, pz + 1);
             const v011 = getVertexIndex(px, py + 1, pz + 1);
             const v111 = getVertexIndex(px + 1, py + 1, pz + 1);
-            if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) {
+
+            // 面を追加（面の順番に注意）
+            if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) { // 上
               addFace(v011, v111, v110, v010, matName);
             }
-            if (y === 0 || !voxelData[y - 1]?.[z]?.[x]) {
+            if (y === 0 || !voxelData[y - 1]?.[z]?.[x]) { // 下
               addFace(v000, v100, v101, v001, matName);
             }
-            if (x === width - 1 || !voxelData[y]?.[z]?.[x + 1]) {
+            if (x === width - 1 || !voxelData[y]?.[z]?.[x + 1]) { // 右
               addFace(v100, v110, v111, v101, matName);
             }
-            if (x === 0 || !voxelData[y]?.[z]?.[x - 1]) {
+            if (x === 0 || !voxelData[y]?.[z]?.[x - 1]) { // 左
               addFace(v001, v011, v010, v000, matName);
             }
-            if (z === depth - 1 || !voxelData[y]?.[z + 1]?.[x]) {
+            if (z === depth - 1 || !voxelData[y]?.[z + 1]?.[x]) { // 前
               addFace(v001, v101, v111, v011, matName);
             }
-            if (z === 0 || !voxelData[y]?.[z - 1]?.[x]) {
+            if (z === 0 || !voxelData[y]?.[z - 1]?.[x]) { // 後ろ
               addFace(v100, v000, v010, v110, matName);
             }
           }
         }
       }
+
       obj += vertices.join('\n') + '\n';
       for (const matName in facesByMaterial) {
         obj += `usemtl ${matName}\n`;
         obj += facesByMaterial[matName].join('\n') + '\n';
       }
+
       zip.file("model.obj", obj);
       zip.file("model.mtl", mtl);
       zip.generateAsync({ type: "blob" }).then(blob => {
@@ -491,95 +565,9 @@
         URL.revokeObjectURL(url);
       });
     }
-    async function exportLayerAsObj() {
-      if (currentLayer >= height) {
-        alert("現在のレイヤーが範囲外です。");
-        return;
-      }
-      const layerData = voxelData[currentLayer];
-      const layerHeight = 1;
-      const modelName = `layer_${currentLayer + 1}`;
-      const textureCanvas = document.createElement('canvas');
-      textureCanvas.width = width;
-      textureCanvas.height = depth;
-      const ctx = textureCanvas.getContext('2d');
-      const imageData = ctx.createImageData(width, depth);
-      let pixelIndex = 0;
-      for (let z = 0; z < depth; z++) {
-        for (let x = 0; x < width; x++) {
-          const color = layerData[z][x];
-          if (color) {
-            const r = parseInt(color.slice(1, 3), 16);
-            const g = parseInt(color.slice(3, 5), 16);
-            const b = parseInt(color.slice(5, 7), 16);
-            imageData.data[pixelIndex++] = r;
-            imageData.data[pixelIndex++] = g;
-            imageData.data[pixelIndex++] = b;
-            imageData.data[pixelIndex++] = 255;
-          } else {
-            imageData.data[pixelIndex++] = 0;
-            imageData.data[pixelIndex++] = 0;
-            imageData.data[pixelIndex++] = 0;
-            imageData.data[pixelIndex++] = 0;
-          }
-        }
-      }
-      ctx.putImageData(imageData, 0, 0);
-      let obj = `mtllib ${modelName}.mtl\n`;
-      let mtl = `newmtl material_1\nKa 1.000 1.000 1.000\nKd 1.000 1.000 1.000\nmap_Kd ${modelName}.png\n`;
-      const vertices = [];
-      const uvs = [];
-      const faces = [];
-      const scale = 1.0;
-      for (let z = 0; z < depth; z++) {
-        for (let x = 0; x < width; x++) {
-          if (layerData[z][x]) {
-            vertices.push(
-              `v ${x * scale} 0 ${z * scale}`,
-              `v ${(x + 1) * scale} 0 ${z * scale}`,
-              `v ${(x + 1) * scale} 0 ${(z + 1) * scale}`,
-              `v ${x * scale} 0 ${(z + 1) * scale}`,
-              `v ${x * scale} ${layerHeight * scale} ${z * scale}`,
-              `v ${(x + 1) * scale} ${layerHeight * scale} ${z * scale}`,
-              `v ${(x + 1) * scale} ${layerHeight * scale} ${(z + 1) * scale}`,
-              `v ${x * scale} ${layerHeight * scale} ${(z + 1) * scale}`
-            );
-            const u1 = x / width;
-            const v1 = z / depth;
-            const u2 = (x + 1) / width;
-            const v2 = (z + 1) / depth;
-            uvs.push(
-              `vt ${u1} ${v1}`, `vt ${u2} ${v1}`, `vt ${u2} ${v2}`, `vt ${u1} ${v2}`,
-              `vt ${u1} ${v1}`, `vt ${u2} ${v1}`, `vt ${u2} ${v2}`, `vt ${u1} ${v2}`
-            );
-            const vtxOffset = (x + z * width) * 8 + 1;
-            const uvOffset = (x + z * width) * 4 + 1;
-            faces.push(
-              `f ${vtxOffset+4}/${uvOffset+3} ${vtxOffset+5}/${uvOffset+2} ${vtxOffset+6}/${uvOffset+1} ${vtxOffset+7}/${uvOffset}`,
-              `f ${vtxOffset}/${uvOffset} ${vtxOffset+1}/${uvOffset+1} ${vtxOffset+2}/${uvOffset+2} ${vtxOffset+3}/${uvOffset+3}`
-            );
-          }
-        }
-      }
-      obj += vertices.join('\n') + '\n';
-      obj += uvs.join('\n') + '\n';
-      obj += `usemtl material_1\n`;
-      obj += faces.join('\n');
-      const zip = new JSZip();
-      zip.file(`${modelName}.obj`, obj);
-      zip.file(`${modelName}.mtl`, mtl);
-      const textureBlob = await new Promise(resolve => textureCanvas.toBlob(resolve, 'image/png'));
-      zip.file(`${modelName}.png`, textureBlob);
-      zip.generateAsync({ type: "blob" }).then(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${modelName}.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-      });
-    }
-    let overlayImage = null;
+
+    // 画像関係の変数
+    let overlayImage = null;  // <img>要素
     let isImageMoveMode = false;
     let imageOffsetX = 0;
     let imageOffsetY = 0;
@@ -588,34 +576,45 @@
     let dragStartY = 0;
     let imgStartLeft = 0;
     let imgStartTop = 0;
+
+    // 画像アップロード
     const imageInput = document.getElementById('imageInput');
     const imgWidthInput = document.getElementById('imgWidth');
     const imgHeightInput = document.getElementById('imgHeight');
     const applyImageSizeBtn = document.getElementById('applyImageSize');
     const toggleMoveImageBtn = document.getElementById('toggleMoveImage');
     const deleteImageBtn = document.getElementById('deleteImageBtn');
+
     imageInput.addEventListener('change', (e) => {
       if (!e.target.files || e.target.files.length === 0) return;
+
       const file = e.target.files[0];
       const reader = new FileReader();
+
       reader.onload = () => {
         if (overlayImage) {
           overlayImage.remove();
           overlayImage = null;
         }
+
         overlayImage = document.createElement('img');
         overlayImage.src = reader.result;
         overlayImage.className = 'overlay-image';
         overlayImage.style.width = imgWidthInput.value + 'px';
         overlayImage.style.height = imgHeightInput.value + 'px';
+
+        // 初期位置はグリッド左上に
         overlayImage.style.left = '0px';
         overlayImage.style.top = '0px';
+
         gridWrapper.appendChild(overlayImage);
         updateImagePositionAndLayer();
       };
       reader.readAsDataURL(file);
-      imageInput.value = '';
+      imageInput.value = ''; // 同じ画像選んだ時も発火させるためにクリア
     });
+
+    // 画像サイズ変更
     applyImageSizeBtn.addEventListener('click', () => {
       if (!overlayImage) return;
       let w = parseInt(imgWidthInput.value);
@@ -625,12 +624,16 @@
       overlayImage.style.width = w + 'px';
       overlayImage.style.height = h + 'px';
     });
+
+    // 画像移動モード切替
     toggleMoveImageBtn.addEventListener('click', () => {
       if (!overlayImage) return;
+
       isImageMoveMode = !isImageMoveMode;
       if (isImageMoveMode) {
         toggleMoveImageBtn.textContent = "画像移動モード: ON";
         overlayImage.classList.add('moving');
+        // 画像をマス目の上（z-index 高く）に
         overlayImage.style.zIndex = 25;
         overlayImage.style.opacity = '1.0';
         overlayImage.style.pointerEvents = 'auto';
@@ -638,12 +641,15 @@
       } else {
         toggleMoveImageBtn.textContent = "画像移動モード: OFF";
         overlayImage.classList.remove('moving');
+        // 画像をマス目の下（透明度0.3、pointer-events:none）
         overlayImage.style.zIndex = 1;
         overlayImage.style.opacity = '0.3';
         overlayImage.style.pointerEvents = 'none';
         overlayImage.style.cursor = 'default';
       }
     });
+
+    // 画像削除ボタン
     deleteImageBtn.addEventListener('click', () => {
       if (overlayImage) {
         overlayImage.remove();
@@ -652,9 +658,12 @@
         toggleMoveImageBtn.textContent = "画像移動モード: OFF";
       }
     });
+
+    // 画像ドラッグイベント（移動モード中のみ）
     gridWrapper.addEventListener('mousedown', (e) => {
       if (!isImageMoveMode || !overlayImage) return;
       if (e.target !== overlayImage) return;
+
       dragging = true;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
@@ -665,14 +674,18 @@
     window.addEventListener('mousemove', (e) => {
       if (!dragging || !overlayImage) return;
       if (!isImageMoveMode) return;
+
       const dx = e.clientX - dragStartX;
       const dy = e.clientY - dragStartY;
       let newLeft = imgStartLeft + dx;
       let newTop = imgStartTop + dy;
+
+      // グリッド範囲内に制限（オーバーフローOKならこの制限外してもいい）
       const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
       const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
       newLeft = Math.min(Math.max(0, newLeft), maxLeft);
       newTop = Math.min(Math.max(0, newTop), maxTop);
+
       overlayImage.style.left = newLeft + "px";
       overlayImage.style.top = newTop + "px";
     });
@@ -681,9 +694,12 @@
         dragging = false;
       }
     });
+
+    // タッチ対応ドラッグ
     gridWrapper.addEventListener('touchstart', (e) => {
       if (!isImageMoveMode || !overlayImage) return;
       if (e.target !== overlayImage) return;
+
       dragging = true;
       const touch = e.touches[0];
       dragStartX = touch.clientX;
@@ -695,24 +711,32 @@
     window.addEventListener('touchmove', (e) => {
       if (!dragging || !overlayImage) return;
       if (!isImageMoveMode) return;
+
       const touch = e.touches[0];
       const dx = touch.clientX - dragStartX;
       const dy = touch.clientY - dragStartY;
       let newLeft = imgStartLeft + dx;
       let newTop = imgStartTop + dy;
+
       const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
       const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
       newLeft = Math.min(Math.max(0, newLeft), maxLeft);
       newTop = Math.min(Math.max(0, newTop), maxTop);
+
       overlayImage.style.left = newLeft + "px";
       overlayImage.style.top = newTop + "px";
+
       e.preventDefault();
     }, { passive: false });
     window.addEventListener('touchend', () => {
       dragging = false;
     });
+
+    // 画像位置とレイヤー管理
+    // 移動モード中は画像をマス目の上、非移動中はマス目の下
     function updateImagePositionAndLayer() {
       if (!overlayImage) return;
+
       if (isImageMoveMode) {
         overlayImage.style.zIndex = 10;
         overlayImage.style.opacity = '1.0';
@@ -723,6 +747,8 @@
         overlayImage.style.pointerEvents = 'none';
       }
     }
+
+    // リセット時に画像も消す処理を追加
     document.getElementById("resetBtn").addEventListener("click", () => {
       if (confirm("本当にリセットする？未保存のデータは消えるよ？")) {
         saveStateForUndo();
@@ -731,6 +757,7 @@
         updateLayerLabel();
         renderGrid();
         if (is3DInitialized) update3DView();
+        // 画像も消す
         if (overlayImage) {
           overlayImage.remove();
           overlayImage = null;
@@ -739,20 +766,23 @@
         }
       }
     });
+
+    // 他のイベント登録（色変更・描画モード切替など）
     document.getElementById("colorPicker").addEventListener("input", e => {
       drawColor = e.target.value;
       isErasing = false;
     });
     document.getElementById("drawBtn").addEventListener("click", () => {
-      isErasing = true;
+      isErasing = false;
     });
     document.getElementById("eraseBtn").addEventListener("click", () => {
-      isErasing = false;
+      isErasing = true;
     });
     document.getElementById("brushSize").addEventListener("input", e => {
       brushSize = parseInt(e.target.value);
       document.getElementById("brushSizeValue").textContent = brushSize;
     });
+
     document.getElementById("layerPrevBtn").addEventListener("click", () => {
       if (currentLayer > 0) currentLayer--;
       updateLayerLabel();
@@ -763,6 +793,7 @@
       updateLayerLabel();
       renderGrid();
     });
+
     document.getElementById("resizeBtn").addEventListener("click", () => {
       const newW = parseInt(document.getElementById("inputWidth").value);
       const newH = parseInt(document.getElementById("inputHeight").value);
@@ -777,6 +808,7 @@
         if (is3DInitialized) update3DView();
       }
     });
+
     document.getElementById("copyLayerAddBtn").addEventListener("click", () => {
       saveStateForUndo();
       const copyLayer = voxelData[currentLayer].map(row => row.slice());
@@ -788,6 +820,7 @@
       renderGrid();
       if (is3DInitialized) update3DView();
     });
+
     document.getElementById("show2dBtn").addEventListener("click", () => {
       rendererContainer.style.display = "none";
       gridContainer.style.display = "block";
@@ -800,10 +833,11 @@
       gridContainer.style.display = "none";
       update3DView();
     });
+
     document.getElementById("saveJsonBtn").addEventListener("click", saveJSON);
     document.getElementById("saveObjBtn").addEventListener("click", saveOBJ);
     document.getElementById("undoBtn").addEventListener("click", undo);
-    document.getElementById("exportLayerObjBtn").addEventListener("click", exportLayerAsObj);
+
     document.getElementById("scrollUp").addEventListener("click", () => {
       gridContainer.scrollBy(0, -50);
     });
@@ -816,57 +850,77 @@
     document.getElementById("scrollRight").addEventListener("click", () => {
       gridContainer.scrollBy(50, 0);
     });
-    document.getElementById("save3dImageBtn").addEventListener("click", () => {
-      if (!is3DInitialized) return;
-      renderer.render(scene, camera);
-      const dataURL = renderer.domElement.toDataURL("image/png");
-      const a = document.createElement("a");
-      a.href = dataURL;
-      a.download = `voxel_3dview.png`;
-      a.click();
-    });
-    const importJsonInput = document.getElementById('importJsonInput');
-    importJsonInput.addEventListener('change', e => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = () => {
-        try {
-          const data = JSON.parse(reader.result);
-          if (
-            typeof data.width === 'number' &&
-            typeof data.height === 'number' &&
-            typeof data.depth === 'number' &&
-            Array.isArray(data.voxelData)
-          ) {
-            width = data.width;
-            height = data.height;
-            depth = data.depth;
-            voxelData = data.voxelData;
-            document.getElementById("inputWidth").value = width;
-            document.getElementById("inputHeight").value = height;
-            document.getElementById("inputDepth").value = depth;
-            currentLayer = 0;
-            updateLayerLabel();
-            renderGrid();
-            if (is3DInitialized) update3DView();
-          } else {
-            alert("不正なJSONデータです。");
-          }
-        } catch (err) {
-          alert("JSONの読み込みに失敗しました。");
-          console.error(err);
-        }
-      };
-      reader.readAsText(file);
-      importJsonInput.value = "";
-    });
+
+document.getElementById("save3dImageBtn").addEventListener("click", () => {
+  if (!is3DInitialized) return;
+
+  // 描画を一度強制してから保存（念のため）
+  renderer.render(scene, camera);
+
+  // 画像化
+  const dataURL = renderer.domElement.toDataURL("image/png");
+
+  // ダウンロード処理
+  const a = document.createElement("a");
+  a.href = dataURL;
+  a.download = `voxel_3dview.png`;
+  a.click();
+});
+
+const importJsonInput = document.getElementById('importJsonInput');
+
+importJsonInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(reader.result);
+
+      if (
+        typeof data.width === 'number' &&
+        typeof data.height === 'number' &&
+        typeof data.depth === 'number' &&
+        Array.isArray(data.voxelData)
+      ) {
+        width = data.width;
+        height = data.height;
+        depth = data.depth;
+        voxelData = data.voxelData;
+
+        // UIのサイズも更新
+        document.getElementById("inputWidth").value = width;
+        document.getElementById("inputHeight").value = height;
+        document.getElementById("inputDepth").value = depth;
+
+        currentLayer = 0;
+        updateLayerLabel();
+        renderGrid();
+        if (is3DInitialized) update3DView();
+      } else {
+        alert("不正なJSONデータです。");
+      }
+    } catch (err) {
+      alert("JSONの読み込みに失敗しました。");
+      console.error(err);
+    }
+  };
+  reader.readAsText(file);
+
+  // 選択クリア
+  importJsonInput.value = "";
+});
+
+
+    // データのリサイズ関数
     function resizeVoxelData(newW, newH, newD) {
       const newData = Array.from({ length: newH }, () =>
         Array.from({ length: newD }, () =>
           Array.from({ length: newW }, () => null)
         )
       );
+
       for (let y = 0; y < Math.min(height, newH); y++) {
         for (let z = 0; z < Math.min(depth, newD); z++) {
           for (let x = 0; x < Math.min(width, newW); x++) {
@@ -876,9 +930,12 @@
       }
       voxelData = newData;
     }
+
+    // 初期化
     initData();
     updateLayerLabel();
     renderGrid();
+
     window.addEventListener('resize', () => {
       if (is3DInitialized) {
         renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
