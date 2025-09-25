@@ -367,8 +367,14 @@
             setMode('select');
             clearSelection();
         });
-        drawBtn.addEventListener('click', () => setMode('draw'));
-        eraseBtn.addEventListener('click', () => setMode('erase'));
+        drawBtn.addEventListener('click', () => {
+            isErasing = false;
+            setMode('draw');
+        });
+        eraseBtn.addEventListener('click', () => {
+            isErasing = true; // ★修正箇所
+            setMode('erase');
+        });
 
         cancelSelectionBtn.addEventListener('click', () => {
             clearSelection();
