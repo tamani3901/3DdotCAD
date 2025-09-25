@@ -69,7 +69,7 @@
             pointer-events: none;
         }
 
-        /* ★★★ 選択範囲のスタイルを追加 ★★★ */
+        /* ★★★ 選択範囲のスタイルを修正・追加 ★★★ */
         #selection-box {
             position: absolute;
             background-color: rgba(0, 100, 255, 0.4);
@@ -77,15 +77,19 @@
             pointer-events: none;
             z-index: 50;
         }
+        .selecting-cell {
+            opacity: 0.8;
+            border: 1px solid rgba(255, 255, 255, 0.8) !important;
+        }
         .selected-cell {
             opacity: 0.8;
-            border: 1px solid rgba(255, 255, 255, 0.8) !important;
-            background-color: rgba(255, 255, 255, 0.4);
+            border: 1px dashed rgba(255, 255, 255, 0.8) !important;
         }
-        .selection-cell {
-            opacity: 0.8;
-            border: 1px solid rgba(255, 255, 255, 0.8) !important;
+        .moving-box {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            border: 2px dashed rgba(255, 255, 255, 0.8) !important;
         }
+
 
         #renderer-container {
             display: none;
@@ -292,7 +296,8 @@
         const cancelBtn = document.getElementById('cancelBtn');
 
         // ★★★ 選択移動機能の追加/変更 ★★★
-        let currentMode = 'draw'; // 'draw', 'erase', 'select'
+        let currentMode = 'draw'; // 'draw', 'erase', 'select', 'move'
+        let isDrawing = false;
         let isSelecting = false;
         let isMoving = false;
         let startCellX, startCellZ;
@@ -311,13 +316,9 @@
         function setMode(mode) {
             currentMode = mode;
             // ボタンの表示を切り替える
-            drawBtn.textContent = '描画';
-            eraseBtn.textContent = '消去';
-            selectBtn.textContent = '選択';
             drawBtn.style.backgroundColor = '';
             eraseBtn.style.backgroundColor = '';
             selectBtn.style.backgroundColor = '';
-            
             completeSelectionBtn.style.display = 'none';
             cancelSelectionBtn.style.display = 'none';
 
@@ -325,15 +326,14 @@
                 drawBtn.style.backgroundColor = '#666';
             } else if (mode === 'erase') {
                 eraseBtn.style.backgroundColor = '#666';
-            } else if (mode === 'select') {
+            } else if (mode === 'select' || mode === 'move') {
                 selectBtn.style.backgroundColor = '#666';
                 completeSelectionBtn.style.display = 'inline-block';
                 cancelSelectionBtn.style.display = 'inline-block';
             }
-
-            // 選択状態をリセット
-            if (mode !== 'select' || selectedCells.length > 0) {
-                 clearSelection();
+            
+            if (mode !== 'select' && mode !== 'move') {
+                clearSelection();
             }
         }
         
@@ -343,9 +343,11 @@
             isSelecting = false;
             isMoving = false;
             selectionBox.style.display = 'none';
+            selectionBox.classList.remove('moving-box');
             cells.flat().forEach(cell => {
-                cell.classList.remove('selection-cell');
+                cell.classList.remove('selecting-cell');
             });
+            renderGrid();
         }
         
         function getCellFromPoint(clientX, clientY) {
@@ -361,13 +363,59 @@
         }
 
         // イベントリスナーの追加
-        selectBtn.addEventListener('click', () => setMode('select'));
+        selectBtn.addEventListener('click', () => {
+            setMode('select');
+            clearSelection();
+        });
         drawBtn.addEventListener('click', () => setMode('draw'));
         eraseBtn.addEventListener('click', () => setMode('erase'));
 
         cancelSelectionBtn.addEventListener('click', () => {
             clearSelection();
             setMode('draw');
+        });
+        
+        completeSelectionBtn.addEventListener('click', () => {
+            if (isSelecting) {
+                // 選択範囲の確定
+                isSelecting = false;
+                const rect = selectionBox.getBoundingClientRect();
+                const gridRect = grid.getBoundingClientRect();
+                const startX = Math.round((rect.left - gridRect.left) / 20);
+                const startZ = Math.round((rect.top - gridRect.top) / 20);
+                const endX = startX + Math.round(rect.width / 20) - 1;
+                const endZ = startZ + Math.round(rect.height / 20) - 1;
+
+                selectedCells = [];
+                selectedVoxelData = [];
+                
+                // 選択範囲内のボクセルデータを保存
+                for (let z = startZ; z <= endZ; z++) {
+                    for (let x = startX; x <= endX; x++) {
+                        const color = voxelData[currentLayer][z][x];
+                        if (color) {
+                            selectedCells.push({ x, z, color });
+                            selectedVoxelData.push({ x: x - startX, z: z - startZ, color });
+                        }
+                    }
+                }
+                
+                // 元の場所を消去
+                selectedCells.forEach(cell => {
+                    voxelData[currentLayer][cell.z][cell.x] = null;
+                });
+                
+                renderGrid();
+                selectionBox.style.display = 'block';
+                selectionBox.classList.add('moving-box');
+                setMode('move');
+                return;
+            }
+            if (currentMode === 'move' && selectedCells.length > 0) {
+                // 移動完了後、選択モードを終了
+                clearSelection();
+                setMode('draw');
+            }
         });
 
         grid.addEventListener('mousedown', (e) => {
@@ -380,19 +428,20 @@
                 e.preventDefault();
                 isDrawing = true;
                 paintCells(x, z);
-            } else if (currentMode === 'select' && selectedCells.length === 0) {
+            } else if (currentMode === 'select') {
                 // 選択開始
                 isSelecting = true;
                 startCellX = x;
                 startCellZ = z;
                 selectionBox.style.display = 'block';
+                selectionBox.classList.remove('moving-box');
                 selectionBox.style.left = `${x * 20}px`;
                 selectionBox.style.top = `${z * 20}px`;
                 selectionBox.style.width = '0px';
                 selectionBox.style.height = '0px';
                 e.preventDefault();
-            } else if (currentMode === 'select' && selectedCells.length > 0) {
-                // 選択範囲内の移動開始
+            } else if (currentMode === 'move') {
+                // 移動開始
                 const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
                 if (cellIndex !== -1) {
                     isMoving = true;
@@ -405,6 +454,7 @@
                 } else {
                     // 選択範囲外をクリックしたらリセット
                     clearSelection();
+                    setMode('draw');
                 }
             }
         });
@@ -421,49 +471,38 @@
                 }
             } else if (currentMode === 'select') {
                 if (isSelecting) {
-                    // 選択範囲の描画を更新
                     const cell = e.target.closest('.cell');
                     if (!cell) return;
                     const endX = parseInt(cell.dataset.x);
                     const endZ = parseInt(cell.dataset.z);
-                    
                     const minX = Math.min(startCellX, endX);
                     const maxX = Math.max(startCellX, endX);
                     const minZ = Math.min(startCellZ, endZ);
                     const maxZ = Math.max(startCellZ, endZ);
-
                     selectionBox.style.left = `${minX * 20}px`;
                     selectionBox.style.top = `${minZ * 20}px`;
                     selectionBox.style.width = `${(maxX - minX + 1) * 20}px`;
                     selectionBox.style.height = `${(maxZ - minZ + 1) * 20}px`;
-
-                    cells.flat().forEach(c => c.classList.remove('selection-cell'));
+                    cells.flat().forEach(c => c.classList.remove('selecting-cell'));
                     for (let z = minZ; z <= maxZ; z++) {
                         for (let x = minX; x <= maxX; x++) {
-                            cells[z][x].classList.add('selection-cell');
+                            cells[z][x].classList.add('selecting-cell');
                         }
                     }
-                } else if (isMoving) {
-                    // 選択範囲の移動
-                    const dx = Math.round((e.clientX - movingStartMouseX) / 20);
-                    const dy = Math.round((e.clientY - movingStartMouseY) / 20);
-                    
-                    const newX = Math.max(0, movingStartGridX + dx);
-                    const newZ = Math.max(0, movingStartGridZ + dy);
-
-                    selectionBox.style.left = `${newX * 20}px`;
-                    selectionBox.style.top = `${newZ * 20}px`;
                 }
+            } else if (currentMode === 'move' && isMoving) {
+                const dx = Math.round((e.clientX - movingStartMouseX) / 20);
+                const dy = Math.round((e.clientY - movingStartMouseY) / 20);
+                const newX = movingStartGridX + dx;
+                const newZ = movingStartGridZ + dy;
+                selectionBox.style.left = `${newX * 20}px`;
+                selectionBox.style.top = `${newZ * 20}px`;
             }
         });
 
-        window.addEventListener('mouseup', () => {
+        window.addEventListener('mouseup', (e) => {
             isDrawing = false;
-            if (isSelecting) {
-                // 選択範囲の確定
-                isSelecting = false;
-            } else if (isMoving) {
-                // 移動の完了
+            if (currentMode === 'move' && isMoving) {
                 const dx = Math.round((e.clientX - movingStartMouseX) / 20);
                 const dy = Math.round((e.clientY - movingStartMouseY) / 20);
                 moveSelectedCells(dx, dy);
@@ -482,17 +521,18 @@
                 e.preventDefault();
                 isDrawing = true;
                 paintCells(x, z);
-            } else if (currentMode === 'select' && selectedCells.length === 0) {
+            } else if (currentMode === 'select') {
                 isSelecting = true;
                 startCellX = x;
                 startCellZ = z;
                 selectionBox.style.display = 'block';
+                selectionBox.classList.remove('moving-box');
                 selectionBox.style.left = `${x * 20}px`;
                 selectionBox.style.top = `${z * 20}px`;
                 selectionBox.style.width = '0px';
                 selectionBox.style.height = '0px';
                 e.preventDefault();
-            } else if (currentMode === 'select' && selectedCells.length > 0) {
+            } else if (currentMode === 'move') {
                 const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
                 if (cellIndex !== -1) {
                     isMoving = true;
@@ -504,6 +544,7 @@
                     e.preventDefault();
                 } else {
                     clearSelection();
+                    setMode('draw');
                 }
             }
         }, { passive: false });
@@ -527,43 +568,36 @@
                     if (!cell) return;
                     const endX = parseInt(cell.dataset.x);
                     const endZ = parseInt(cell.dataset.z);
-                    
                     const minX = Math.min(startCellX, endX);
                     const maxX = Math.max(startCellX, endX);
                     const minZ = Math.min(startCellZ, endZ);
                     const maxZ = Math.max(startCellZ, endZ);
-
                     selectionBox.style.left = `${minX * 20}px`;
                     selectionBox.style.top = `${minZ * 20}px`;
                     selectionBox.style.width = `${(maxX - minX + 1) * 20}px`;
                     selectionBox.style.height = `${(maxZ - minZ + 1) * 20}px`;
-
-                    cells.flat().forEach(c => c.classList.remove('selection-cell'));
+                    cells.flat().forEach(c => c.classList.remove('selecting-cell'));
                     for (let z = minZ; z <= maxZ; z++) {
                         for (let x = minX; x <= maxX; x++) {
-                            cells[z][x].classList.add('selection-cell');
+                            cells[z][x].classList.add('selecting-cell');
                         }
                     }
-                } else if (isMoving) {
-                    e.preventDefault();
-                    const touch = e.touches[0];
-                    const dx = Math.round((touch.clientX - movingStartMouseX) / 20);
-                    const dy = Math.round((touch.clientY - movingStartMouseY) / 20);
-                    
-                    const newX = Math.max(0, movingStartGridX + dx);
-                    const newZ = Math.max(0, movingStartGridZ + dy);
-
-                    selectionBox.style.left = `${newX * 20}px`;
-                    selectionBox.style.top = `${newZ * 20}px`;
                 }
+            } else if (currentMode === 'move' && isMoving) {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const dx = Math.round((touch.clientX - movingStartMouseX) / 20);
+                const dy = Math.round((touch.clientY - movingStartMouseY) / 20);
+                const newX = movingStartGridX + dx;
+                const newZ = movingStartGridZ + dy;
+                selectionBox.style.left = `${newX * 20}px`;
+                selectionBox.style.top = `${newZ * 20}px`;
             }
         }, { passive: false });
         
-        window.addEventListener('touchend', () => {
+        window.addEventListener('touchend', (e) => {
             isDrawing = false;
-            if (isSelecting) {
-                isSelecting = false;
-            } else if (isMoving) {
+            if (currentMode === 'move' && isMoving) {
                 const dx = Math.round((e.changedTouches[0].clientX - movingStartMouseX) / 20);
                 const dy = Math.round((e.changedTouches[0].clientY - movingStartMouseY) / 20);
                 moveSelectedCells(dx, dy);
@@ -571,50 +605,10 @@
             }
         });
 
-        // 選択範囲のボクセルを保持する関数
-        completeSelectionBtn.addEventListener('click', () => {
-            if (isSelecting || selectionBox.style.display === 'none') return;
-            
-            const rect = selectionBox.getBoundingClientRect();
-            const gridRect = grid.getBoundingClientRect();
-            
-            const startX = Math.round((rect.left - gridRect.left) / 20);
-            const startZ = Math.round((rect.top - gridRect.top) / 20);
-            const endX = startX + Math.round(rect.width / 20) - 1;
-            const endZ = startZ + Math.round(rect.height / 20) - 1;
-
-            selectedCells = [];
-            selectedVoxelData = [];
-            
-            // 選択範囲内のボクセルデータを保存
-            for (let z = startZ; z <= endZ; z++) {
-                for (let x = startX; x <= endX; x++) {
-                    const color = voxelData[currentLayer][z][x];
-                    if (color) {
-                        selectedCells.push({ x, z, color });
-                        selectedVoxelData.push({ x: x - startX, z: z - startZ, color });
-                    }
-                }
-            }
-            
-            // 元の場所を消去
-            selectedCells.forEach(cell => {
-                voxelData[currentLayer][cell.z][cell.x] = null;
-            });
-            
-            renderGrid();
-            selectionBox.style.display = 'none';
-        });
-
         // 選択されたボクセルを移動する関数
         function moveSelectedCells(dx, dy) {
             if (selectedVoxelData.length === 0) return;
             
-            // 元の場所をクリア
-            selectedCells.forEach(cell => {
-                voxelData[currentLayer][cell.z][cell.x] = null;
-            });
-
             // 新しい位置にボクセルを配置
             const newSelectedCells = [];
             selectedVoxelData.forEach(voxel => {
@@ -687,8 +681,6 @@
                         highlight.style.display = "none";
                     });
 
-                    // マウス/タッチイベントは選択モードのコードに集約
-                    
                     grid.appendChild(cell);
                     row.push(cell);
                 }
@@ -701,7 +693,6 @@
                 for (let x = 0; x < width; x++) {
                     const color = voxelData[currentLayer][z][x];
                     cells[z][x].style.backgroundColor = color ?? "transparent";
-                    // 選択されたボクセルもハイライト
                     const isSelected = selectedCells.some(c => c.x === x && c.z === z);
                     cells[z][x].classList.toggle('selected-cell', isSelected);
                 }
@@ -1060,14 +1051,6 @@
             drawColor = e.target.value;
             isErasing = false;
             setMode('draw');
-        });
-        document.getElementById("drawBtn").addEventListener("click", () => {
-            isErasing = false;
-            setMode('draw');
-        });
-        document.getElementById("eraseBtn").addEventListener("click", () => {
-            isErasing = true;
-            setMode('erase');
         });
         document.getElementById("brushSize").addEventListener("input", e => {
             brushSize = parseInt(e.target.value);
