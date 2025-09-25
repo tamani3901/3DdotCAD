@@ -68,6 +68,25 @@
             background-color: rgba(255, 255, 255, 0.2);
             pointer-events: none;
         }
+
+        /* ★★★ 選択範囲のスタイルを追加 ★★★ */
+        #selection-box {
+            position: absolute;
+            background-color: rgba(0, 100, 255, 0.4);
+            border: 1px dashed rgba(255, 255, 255, 0.8);
+            pointer-events: none;
+            z-index: 50;
+        }
+        .selected-cell {
+            opacity: 0.8;
+            border: 1px solid rgba(255, 255, 255, 0.8) !important;
+            background-color: rgba(255, 255, 255, 0.4);
+        }
+        .selection-cell {
+            opacity: 0.8;
+            border: 1px solid rgba(255, 255, 255, 0.8) !important;
+        }
+
         #renderer-container {
             display: none;
             width: 80vw;
@@ -161,6 +180,9 @@
         <input type="color" id="colorPicker" value="#ff0000" />
         <button id="drawBtn">描画</button>
         <button id="eraseBtn">消去</button>
+        <button id="selectBtn">選択</button>
+        <button id="completeSelectionBtn" style="display:none;">選択完了</button>
+        <button id="cancelSelectionBtn" style="display:none;">キャンセル</button>
         <input type="range" id="brushSize" min="1" max="5" value="1" />
         <span id="brushSizeValue">1</span>
         <button id="layerPrevBtn">↑</button>
@@ -192,6 +214,7 @@
     <div id="grid-container">
         <div id="grid-wrapper">
             <div id="grid"></div>
+            <div id="selection-box" style="display:none;"></div>
         </div>
     </div>
 
@@ -237,14 +260,379 @@
         let currentLayer = 0;
         let drawColor = "#ff0000";
         let isErasing = false;
-        let isDrawing = false;
         let brushSize = 1;
         let voxelData = [];
         let scene, camera, renderer, controls;
         let is3DInitialized = false;
         let voxelMeshes = [];
-
         let undoStack = [];
+        let cells = [];
+        let overlayImage = null;
+        let isImageMoveMode = false;
+        let dragging = false;
+        let dragStartX = 0;
+        let dragStartY = 0;
+        let imgStartLeft = 0;
+        let imgStartTop = 0;
+
+        const grid = document.getElementById("grid");
+        const layerLabel = document.getElementById("layerLabel");
+        const canvas = document.getElementById("threejs-canvas");
+        const rendererContainer = document.getElementById("renderer-container");
+        const gridContainer = document.getElementById("grid-container");
+        const gridWrapper = document.getElementById("grid-wrapper");
+        const imageInput = document.getElementById('imageInput');
+        const imgWidthInput = document.getElementById('imgWidth');
+        const imgHeightInput = document.getElementById('imgHeight');
+        const applyImageSizeBtn = document.getElementById('applyImageSize');
+        const toggleMoveImageBtn = document.getElementById('toggleMoveImage');
+        const deleteImageBtn = document.getElementById('deleteImageBtn');
+        const convertImageTo3dBtn = document.getElementById('convertImageTo3dBtn');
+        const sideSelectionDiv = document.getElementById('sideSelection');
+        const cancelBtn = document.getElementById('cancelBtn');
+
+        // ★★★ 選択移動機能の追加/変更 ★★★
+        let currentMode = 'draw'; // 'draw', 'erase', 'select'
+        let isSelecting = false;
+        let isMoving = false;
+        let startCellX, startCellZ;
+        let selectedCells = [];
+        let selectedVoxelData = [];
+        let movingStartMouseX, movingStartMouseY;
+        let movingStartGridX, movingStartGridZ;
+
+        const selectBtn = document.getElementById('selectBtn');
+        const drawBtn = document.getElementById('drawBtn');
+        const eraseBtn = document.getElementById('eraseBtn');
+        const completeSelectionBtn = document.getElementById('completeSelectionBtn');
+        const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
+        const selectionBox = document.getElementById('selection-box');
+        
+        function setMode(mode) {
+            currentMode = mode;
+            // ボタンの表示を切り替える
+            drawBtn.textContent = '描画';
+            eraseBtn.textContent = '消去';
+            selectBtn.textContent = '選択';
+            drawBtn.style.backgroundColor = '';
+            eraseBtn.style.backgroundColor = '';
+            selectBtn.style.backgroundColor = '';
+            
+            completeSelectionBtn.style.display = 'none';
+            cancelSelectionBtn.style.display = 'none';
+
+            if (mode === 'draw') {
+                drawBtn.style.backgroundColor = '#666';
+            } else if (mode === 'erase') {
+                eraseBtn.style.backgroundColor = '#666';
+            } else if (mode === 'select') {
+                selectBtn.style.backgroundColor = '#666';
+                completeSelectionBtn.style.display = 'inline-block';
+                cancelSelectionBtn.style.display = 'inline-block';
+            }
+
+            // 選択状態をリセット
+            if (mode !== 'select' || selectedCells.length > 0) {
+                 clearSelection();
+            }
+        }
+        
+        function clearSelection() {
+            selectedCells = [];
+            selectedVoxelData = [];
+            isSelecting = false;
+            isMoving = false;
+            selectionBox.style.display = 'none';
+            cells.flat().forEach(cell => {
+                cell.classList.remove('selection-cell');
+            });
+        }
+        
+        function getCellFromPoint(clientX, clientY) {
+            const rect = grid.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+            const cellX = Math.floor(x / 20);
+            const cellZ = Math.floor(y / 20);
+            if (cellX >= 0 && cellX < width && cellZ >= 0 && cellZ < depth) {
+                return cells[cellZ][cellX];
+            }
+            return null;
+        }
+
+        // イベントリスナーの追加
+        selectBtn.addEventListener('click', () => setMode('select'));
+        drawBtn.addEventListener('click', () => setMode('draw'));
+        eraseBtn.addEventListener('click', () => setMode('erase'));
+
+        cancelSelectionBtn.addEventListener('click', () => {
+            clearSelection();
+            setMode('draw');
+        });
+
+        grid.addEventListener('mousedown', (e) => {
+            const cell = e.target.closest('.cell');
+            if (!cell) return;
+            const x = parseInt(cell.dataset.x);
+            const z = parseInt(cell.dataset.z);
+            
+            if (currentMode === 'draw' || currentMode === 'erase') {
+                e.preventDefault();
+                isDrawing = true;
+                paintCells(x, z);
+            } else if (currentMode === 'select' && selectedCells.length === 0) {
+                // 選択開始
+                isSelecting = true;
+                startCellX = x;
+                startCellZ = z;
+                selectionBox.style.display = 'block';
+                selectionBox.style.left = `${x * 20}px`;
+                selectionBox.style.top = `${z * 20}px`;
+                selectionBox.style.width = '0px';
+                selectionBox.style.height = '0px';
+                e.preventDefault();
+            } else if (currentMode === 'select' && selectedCells.length > 0) {
+                // 選択範囲内の移動開始
+                const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
+                if (cellIndex !== -1) {
+                    isMoving = true;
+                    saveStateForUndo();
+                    movingStartMouseX = e.clientX;
+                    movingStartMouseY = e.clientY;
+                    movingStartGridX = parseInt(selectionBox.style.left) / 20;
+                    movingStartGridZ = parseInt(selectionBox.style.top) / 20;
+                    e.preventDefault();
+                } else {
+                    // 選択範囲外をクリックしたらリセット
+                    clearSelection();
+                }
+            }
+        });
+
+        grid.addEventListener('mousemove', (e) => {
+            if (currentMode === 'draw' || currentMode === 'erase') {
+                if (!isDrawing) return;
+                e.preventDefault();
+                const targetElement = e.target;
+                if (targetElement && targetElement.classList.contains("cell")) {
+                    const moveX = parseInt(targetElement.dataset.x);
+                    const moveZ = parseInt(targetElement.dataset.z);
+                    paintCells(moveX, moveZ);
+                }
+            } else if (currentMode === 'select') {
+                if (isSelecting) {
+                    // 選択範囲の描画を更新
+                    const cell = e.target.closest('.cell');
+                    if (!cell) return;
+                    const endX = parseInt(cell.dataset.x);
+                    const endZ = parseInt(cell.dataset.z);
+                    
+                    const minX = Math.min(startCellX, endX);
+                    const maxX = Math.max(startCellX, endX);
+                    const minZ = Math.min(startCellZ, endZ);
+                    const maxZ = Math.max(startCellZ, endZ);
+
+                    selectionBox.style.left = `${minX * 20}px`;
+                    selectionBox.style.top = `${minZ * 20}px`;
+                    selectionBox.style.width = `${(maxX - minX + 1) * 20}px`;
+                    selectionBox.style.height = `${(maxZ - minZ + 1) * 20}px`;
+
+                    cells.flat().forEach(c => c.classList.remove('selection-cell'));
+                    for (let z = minZ; z <= maxZ; z++) {
+                        for (let x = minX; x <= maxX; x++) {
+                            cells[z][x].classList.add('selection-cell');
+                        }
+                    }
+                } else if (isMoving) {
+                    // 選択範囲の移動
+                    const dx = Math.round((e.clientX - movingStartMouseX) / 20);
+                    const dy = Math.round((e.clientY - movingStartMouseY) / 20);
+                    
+                    const newX = Math.max(0, movingStartGridX + dx);
+                    const newZ = Math.max(0, movingStartGridZ + dy);
+
+                    selectionBox.style.left = `${newX * 20}px`;
+                    selectionBox.style.top = `${newZ * 20}px`;
+                }
+            }
+        });
+
+        window.addEventListener('mouseup', () => {
+            isDrawing = false;
+            if (isSelecting) {
+                // 選択範囲の確定
+                isSelecting = false;
+            } else if (isMoving) {
+                // 移動の完了
+                const dx = Math.round((e.clientX - movingStartMouseX) / 20);
+                const dy = Math.round((e.clientY - movingStartMouseY) / 20);
+                moveSelectedCells(dx, dy);
+                isMoving = false;
+            }
+        });
+        
+        // タッチイベントの追加
+        grid.addEventListener('touchstart', (e) => {
+            const cell = getCellFromPoint(e.touches[0].clientX, e.touches[0].clientY);
+            if (!cell) return;
+            const x = parseInt(cell.dataset.x);
+            const z = parseInt(cell.dataset.z);
+            
+            if (currentMode === 'draw' || currentMode === 'erase') {
+                e.preventDefault();
+                isDrawing = true;
+                paintCells(x, z);
+            } else if (currentMode === 'select' && selectedCells.length === 0) {
+                isSelecting = true;
+                startCellX = x;
+                startCellZ = z;
+                selectionBox.style.display = 'block';
+                selectionBox.style.left = `${x * 20}px`;
+                selectionBox.style.top = `${z * 20}px`;
+                selectionBox.style.width = '0px';
+                selectionBox.style.height = '0px';
+                e.preventDefault();
+            } else if (currentMode === 'select' && selectedCells.length > 0) {
+                const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
+                if (cellIndex !== -1) {
+                    isMoving = true;
+                    saveStateForUndo();
+                    movingStartMouseX = e.touches[0].clientX;
+                    movingStartMouseY = e.touches[0].clientY;
+                    movingStartGridX = parseInt(selectionBox.style.left) / 20;
+                    movingStartGridZ = parseInt(selectionBox.style.top) / 20;
+                    e.preventDefault();
+                } else {
+                    clearSelection();
+                }
+            }
+        }, { passive: false });
+
+        grid.addEventListener('touchmove', (e) => {
+            if (currentMode === 'draw' || currentMode === 'erase') {
+                if (!isDrawing) return;
+                e.preventDefault();
+                const touch = e.touches[0];
+                const targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
+                if (targetElement && targetElement.classList.contains("cell")) {
+                    const moveX = parseInt(targetElement.dataset.x);
+                    const moveZ = parseInt(targetElement.dataset.z);
+                    paintCells(moveX, moveZ);
+                }
+            } else if (currentMode === 'select') {
+                if (isSelecting) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const cell = getCellFromPoint(touch.clientX, touch.clientY);
+                    if (!cell) return;
+                    const endX = parseInt(cell.dataset.x);
+                    const endZ = parseInt(cell.dataset.z);
+                    
+                    const minX = Math.min(startCellX, endX);
+                    const maxX = Math.max(startCellX, endX);
+                    const minZ = Math.min(startCellZ, endZ);
+                    const maxZ = Math.max(startCellZ, endZ);
+
+                    selectionBox.style.left = `${minX * 20}px`;
+                    selectionBox.style.top = `${minZ * 20}px`;
+                    selectionBox.style.width = `${(maxX - minX + 1) * 20}px`;
+                    selectionBox.style.height = `${(maxZ - minZ + 1) * 20}px`;
+
+                    cells.flat().forEach(c => c.classList.remove('selection-cell'));
+                    for (let z = minZ; z <= maxZ; z++) {
+                        for (let x = minX; x <= maxX; x++) {
+                            cells[z][x].classList.add('selection-cell');
+                        }
+                    }
+                } else if (isMoving) {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const dx = Math.round((touch.clientX - movingStartMouseX) / 20);
+                    const dy = Math.round((touch.clientY - movingStartMouseY) / 20);
+                    
+                    const newX = Math.max(0, movingStartGridX + dx);
+                    const newZ = Math.max(0, movingStartGridZ + dy);
+
+                    selectionBox.style.left = `${newX * 20}px`;
+                    selectionBox.style.top = `${newZ * 20}px`;
+                }
+            }
+        }, { passive: false });
+        
+        window.addEventListener('touchend', () => {
+            isDrawing = false;
+            if (isSelecting) {
+                isSelecting = false;
+            } else if (isMoving) {
+                const dx = Math.round((e.changedTouches[0].clientX - movingStartMouseX) / 20);
+                const dy = Math.round((e.changedTouches[0].clientY - movingStartMouseY) / 20);
+                moveSelectedCells(dx, dy);
+                isMoving = false;
+            }
+        });
+
+        // 選択範囲のボクセルを保持する関数
+        completeSelectionBtn.addEventListener('click', () => {
+            if (isSelecting || selectionBox.style.display === 'none') return;
+            
+            const rect = selectionBox.getBoundingClientRect();
+            const gridRect = grid.getBoundingClientRect();
+            
+            const startX = Math.round((rect.left - gridRect.left) / 20);
+            const startZ = Math.round((rect.top - gridRect.top) / 20);
+            const endX = startX + Math.round(rect.width / 20) - 1;
+            const endZ = startZ + Math.round(rect.height / 20) - 1;
+
+            selectedCells = [];
+            selectedVoxelData = [];
+            
+            // 選択範囲内のボクセルデータを保存
+            for (let z = startZ; z <= endZ; z++) {
+                for (let x = startX; x <= endX; x++) {
+                    const color = voxelData[currentLayer][z][x];
+                    if (color) {
+                        selectedCells.push({ x, z, color });
+                        selectedVoxelData.push({ x: x - startX, z: z - startZ, color });
+                    }
+                }
+            }
+            
+            // 元の場所を消去
+            selectedCells.forEach(cell => {
+                voxelData[currentLayer][cell.z][cell.x] = null;
+            });
+            
+            renderGrid();
+            selectionBox.style.display = 'none';
+        });
+
+        // 選択されたボクセルを移動する関数
+        function moveSelectedCells(dx, dy) {
+            if (selectedVoxelData.length === 0) return;
+            
+            // 元の場所をクリア
+            selectedCells.forEach(cell => {
+                voxelData[currentLayer][cell.z][cell.x] = null;
+            });
+
+            // 新しい位置にボクセルを配置
+            const newSelectedCells = [];
+            selectedVoxelData.forEach(voxel => {
+                const newX = movingStartGridX + voxel.x + dx;
+                const newZ = movingStartGridZ + voxel.z + dy;
+                
+                if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
+                    voxelData[currentLayer][newZ][newX] = voxel.color;
+                    newSelectedCells.push({ x: newX, z: newZ });
+                }
+            });
+
+            selectedCells = newSelectedCells;
+            renderGrid();
+            if (is3DInitialized) update3DView();
+        }
+
+        // --- 既存の関数 ---
 
         function saveStateForUndo() {
             const clone = voxelData.map(layer =>
@@ -265,13 +653,6 @@
             if (is3DInitialized) update3DView();
         }
 
-        const grid = document.getElementById("grid");
-        const layerLabel = document.getElementById("layerLabel");
-        const canvas = document.getElementById("threejs-canvas");
-        const rendererContainer = document.getElementById("renderer-container");
-        const gridContainer = document.getElementById("grid-container");
-        const gridWrapper = document.getElementById("grid-wrapper");
-
         function initData() {
             voxelData = Array.from({ length: height }, () =>
                 Array.from({ length: depth }, () =>
@@ -280,12 +661,9 @@
             );
         }
 
-        let cells = [];
-
         function initGrid() {
             grid.innerHTML = "";
             cells = [];
-
             grid.style.gridTemplateColumns = `repeat(${width}, 20px)`;
             grid.style.gridTemplateRows = `repeat(${depth}, 20px)`;
 
@@ -309,49 +687,8 @@
                         highlight.style.display = "none";
                     });
 
-                    cell.addEventListener("mousedown", (e) => {
-                        e.preventDefault();
-                        if (!isImageMoveMode) {
-                            isDrawing = true;
-                            paintCells(x, z);
-                        }
-                    });
-                    cell.addEventListener("mousemove", (e) => {
-                        if (isDrawing) {
-                            e.preventDefault();
-                            const targetElement = e.target;
-                            if (targetElement && targetElement.classList.contains("cell")) {
-                                const moveX = parseInt(targetElement.dataset.x);
-                                const moveZ = parseInt(targetElement.dataset.z);
-                                paintCells(moveX, moveZ);
-                            }
-                        }
-                    });
-                    cell.addEventListener("touchstart", (e) => {
-                        e.preventDefault();
-                        if (!isImageMoveMode) {
-                            isDrawing = true;
-                            paintCells(x, z);
-                        }
-                    }, { passive: false });
-                    cell.addEventListener("touchmove", (e) => {
-                        if (isDrawing) {
-                            e.preventDefault();
-                            let targetElement;
-                            if (e.touches) {
-                                const touch = e.touches[0];
-                                targetElement = document.elementFromPoint(touch.clientX, touch.clientY);
-                            } else {
-                                targetElement = e.target;
-                            }
-                            if (targetElement && targetElement.classList.contains("cell")) {
-                                const moveX = parseInt(targetElement.dataset.x);
-                                const moveZ = parseInt(targetElement.dataset.z);
-                                paintCells(moveX, moveZ);
-                            }
-                        }
-                    }, { passive: false });
-
+                    // マウス/タッチイベントは選択モードのコードに集約
+                    
                     grid.appendChild(cell);
                     row.push(cell);
                 }
@@ -364,6 +701,9 @@
                 for (let x = 0; x < width; x++) {
                     const color = voxelData[currentLayer][z][x];
                     cells[z][x].style.backgroundColor = color ?? "transparent";
+                    // 選択されたボクセルもハイライト
+                    const isSelected = selectedCells.some(c => c.x === x && c.z === z);
+                    cells[z][x].classList.toggle('selected-cell', isSelected);
                 }
             }
         }
@@ -383,13 +723,11 @@
                 for (let xOffset = -halfSize; xOffset <= halfSize; xOffset++) {
                     const x = centerX + xOffset;
                     const z = centerZ + zOffset;
-
                     if (x >= 0 && x < width && z >= 0 && z < depth) {
                         voxelData[currentLayer][z][x] = isErasing ? null : drawColor;
                     }
                 }
             }
-
             renderGrid();
             if (is3DInitialized && rendererContainer.style.display === 'block') {
                 update3DView();
@@ -403,32 +741,25 @@
         function init3DView() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x222222);
-
             camera = new THREE.PerspectiveCamera(75, rendererContainer.clientWidth / rendererContainer.clientHeight, 0.1, 1000);
             camera.position.set(width, height, depth);
-
             renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
             renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
             renderer.setPixelRatio(window.devicePixelRatio);
-
             controls = new OrbitControls(camera, renderer.domElement);
             controls.enableDamping = true;
             controls.dampingFactor = 0.1;
             controls.target.set(0, 0, 0);
-
             scene.add(new THREE.AmbientLight(0xffffff, 0.7));
-
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight.position.set(50, 50, 50);
             scene.add(dirLight);
-
             requestAnimationFrame(() => {
                 renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
                 camera.aspect = rendererContainer.clientWidth / rendererContainer.clientHeight;
                 camera.updateProjectionMatrix();
                 animate();
             });
-
             is3DInitialized = true;
             update3DView();
             animate();
@@ -437,12 +768,10 @@
         function update3DView() {
             voxelMeshes.forEach(m => scene.remove(m));
             voxelMeshes = [];
-
             const geometry = new THREE.BoxGeometry(1, 1, 1);
             const centerOffsetX = (width - 1) / 2;
             const centerOffsetY = (height - 1) / 2;
             const centerOffsetZ = (depth - 1) / 2;
-
             let meshCount = 0;
             for (let y = 0; y < height; y++) {
                 for (let z = 0; z < depth; z++) {
@@ -466,7 +795,6 @@
             requestAnimationFrame(animate);
             controls.update();
             renderer.render(scene, camera);
-
             if (!lastAnimateLog || time - lastAnimateLog > 1000) {
                 lastAnimateLog = time;
             }
@@ -490,16 +818,12 @@
             const zip = new JSZip();
             let obj = "mtllib model.mtl\n";
             let mtl = "";
-
             const vertexMap = new Map();
             const vertices = [];
             let currentIndex = 1;
-
             const facesByMaterial = {};
             const materialSet = new Set();
-
             const scale = 1.0;
-
             function getVertexIndex(x, y, z) {
                 const key = `${x},${y},${z}`;
                 if (vertexMap.has(key)) {
@@ -509,7 +833,6 @@
                 vertices.push(`v ${x * scale} ${y * scale} ${z * scale}`);
                 return currentIndex++;
             }
-
             function rgbFromHex(hex) {
                 const value = parseInt(hex.slice(1), 16);
                 const r = ((value >> 16) & 0xff) / 255;
@@ -517,29 +840,24 @@
                 const b = (value & 0xff) / 255;
                 return { r, g, b };
             }
-
             function addFace(v1, v2, v3, v4, matName) {
                 if (!facesByMaterial[matName]) {
                     facesByMaterial[matName] = [];
                 }
                 facesByMaterial[matName].push(`f ${v1} ${v2} ${v3} ${v4}`);
             }
-
             for (let y = 0; y < height; y++) {
                 for (let z = 0; z < depth; z++) {
                     for (let x = 0; x < width; x++) {
                         const color = voxelData[y][z][x];
                         if (!color) continue;
-
                         const matName = "mat_" + color.slice(1);
                         if (!materialSet.has(matName)) {
                             materialSet.add(matName);
                             const { r, g, b } = rgbFromHex(color);
                             mtl += `newmtl ${matName}\nKd ${r.toFixed(4)} ${g.toFixed(4)} ${b.toFixed(4)}\n\n`;
                         }
-
                         const px = x, py = y, pz = z;
-
                         const v000 = getVertexIndex(px, py, pz);
                         const v100 = getVertexIndex(px + 1, py, pz);
                         const v010 = getVertexIndex(px, py + 1, pz);
@@ -548,7 +866,6 @@
                         const v101 = getVertexIndex(px + 1, py, pz + 1);
                         const v011 = getVertexIndex(px, py + 1, pz + 1);
                         const v111 = getVertexIndex(px + 1, py + 1, pz + 1);
-
                         if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) {
                             addFace(v011, v111, v110, v010, matName);
                         }
@@ -570,13 +887,11 @@
                     }
                 }
             }
-
             obj += vertices.join('\n') + '\n';
             for (const matName in facesByMaterial) {
                 obj += `usemtl ${matName}\n`;
                 obj += facesByMaterial[matName].join('\n') + '\n';
             }
-
             zip.file("model.obj", obj);
             zip.file("model.mtl", mtl);
             zip.generateAsync({ type: "blob" }).then(blob => {
@@ -588,45 +903,23 @@
                 URL.revokeObjectURL(url);
             });
         }
-
-        // 画像関係の変数
-        let overlayImage = null;
-        let isImageMoveMode = false;
-        let dragging = false;
-        let dragStartX = 0;
-        let dragStartY = 0;
-        let imgStartLeft = 0;
-        let imgStartTop = 0;
-
-        // 画像アップロード
-        const imageInput = document.getElementById('imageInput');
-        const imgWidthInput = document.getElementById('imgWidth');
-        const imgHeightInput = document.getElementById('imgHeight');
-        const applyImageSizeBtn = document.getElementById('applyImageSize');
-        const toggleMoveImageBtn = document.getElementById('toggleMoveImage');
-        const deleteImageBtn = document.getElementById('deleteImageBtn');
-
+        
         imageInput.addEventListener('change', (e) => {
             if (!e.target.files || e.target.files.length === 0) return;
-
             const file = e.target.files[0];
             const reader = new FileReader();
-
             reader.onload = () => {
                 if (overlayImage) {
                     overlayImage.remove();
                     overlayImage = null;
                 }
-
                 overlayImage = document.createElement('img');
                 overlayImage.src = reader.result;
                 overlayImage.className = 'overlay-image';
                 overlayImage.style.width = imgWidthInput.value + 'px';
                 overlayImage.style.height = imgHeightInput.value + 'px';
-
                 overlayImage.style.left = '0px';
                 overlayImage.style.top = '0px';
-
                 gridWrapper.appendChild(overlayImage);
                 updateImagePositionAndLayer();
             };
@@ -634,7 +927,6 @@
             imageInput.value = '';
         });
 
-        // 画像サイズ変更
         applyImageSizeBtn.addEventListener('click', () => {
             if (!overlayImage) return;
             let w = parseInt(imgWidthInput.value);
@@ -645,10 +937,8 @@
             overlayImage.style.height = h + 'px';
         });
 
-        // 画像移動モード切替
         toggleMoveImageBtn.addEventListener('click', () => {
             if (!overlayImage) return;
-
             isImageMoveMode = !isImageMoveMode;
             if (isImageMoveMode) {
                 toggleMoveImageBtn.textContent = "画像移動モード: ON";
@@ -667,7 +957,6 @@
             }
         });
 
-        // 画像削除ボタン
         deleteImageBtn.addEventListener('click', () => {
             if (overlayImage) {
                 overlayImage.remove();
@@ -677,11 +966,9 @@
             }
         });
 
-        // 画像ドラッグイベント（移動モード中のみ）
         gridWrapper.addEventListener('mousedown', (e) => {
             if (!isImageMoveMode || !overlayImage) return;
             if (e.target !== overlayImage) return;
-
             dragging = true;
             dragStartX = e.clientX;
             dragStartY = e.clientY;
@@ -692,17 +979,14 @@
         window.addEventListener('mousemove', (e) => {
             if (!dragging || !overlayImage) return;
             if (!isImageMoveMode) return;
-
             const dx = e.clientX - dragStartX;
             const dy = e.clientY - dragStartY;
             let newLeft = imgStartLeft + dx;
             let newTop = imgStartTop + dy;
-
             const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
             const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
             newLeft = Math.min(Math.max(0, newLeft), maxLeft);
             newTop = Math.min(Math.max(0, newTop), maxTop);
-
             overlayImage.style.left = newLeft + "px";
             overlayImage.style.top = newTop + "px";
         });
@@ -711,12 +995,9 @@
                 dragging = false;
             }
         });
-
-        // タッチ対応ドラッグ
         gridWrapper.addEventListener('touchstart', (e) => {
             if (!isImageMoveMode || !overlayImage) return;
             if (e.target !== overlayImage) return;
-
             dragging = true;
             const touch = e.touches[0];
             dragStartX = touch.clientX;
@@ -728,31 +1009,25 @@
         window.addEventListener('touchmove', (e) => {
             if (!dragging || !overlayImage) return;
             if (!isImageMoveMode) return;
-
             const touch = e.touches[0];
             const dx = touch.clientX - dragStartX;
             const dy = touch.clientY - dragStartY;
             let newLeft = imgStartLeft + dx;
             let newTop = imgStartTop + dy;
-
             const maxLeft = gridWrapper.clientWidth - overlayImage.clientWidth;
             const maxTop = gridWrapper.clientHeight - overlayImage.clientHeight;
             newLeft = Math.min(Math.max(0, newLeft), maxLeft);
             newTop = Math.min(Math.max(0, newTop), maxTop);
-
             overlayImage.style.left = newLeft + "px";
             overlayImage.style.top = newTop + "px";
-
             e.preventDefault();
         }, { passive: false });
         window.addEventListener('touchend', () => {
             dragging = false;
         });
 
-        // 画像位置とレイヤー管理
         function updateImagePositionAndLayer() {
             if (!overlayImage) return;
-
             if (isImageMoveMode) {
                 overlayImage.style.zIndex = 10;
                 overlayImage.style.opacity = '1.0';
@@ -764,7 +1039,6 @@
             }
         }
 
-        // リセット時に画像も消す処理を追加
         document.getElementById("resetBtn").addEventListener("click", () => {
             if (confirm("本当にリセットする？未保存のデータは消えるよ？")) {
                 saveStateForUndo();
@@ -782,22 +1056,24 @@
             }
         });
 
-        // 他のイベント登録（色変更・描画モード切替など）
         document.getElementById("colorPicker").addEventListener("input", e => {
             drawColor = e.target.value;
             isErasing = false;
+            setMode('draw');
         });
         document.getElementById("drawBtn").addEventListener("click", () => {
             isErasing = false;
+            setMode('draw');
         });
         document.getElementById("eraseBtn").addEventListener("click", () => {
             isErasing = true;
+            setMode('erase');
         });
         document.getElementById("brushSize").addEventListener("input", e => {
             brushSize = parseInt(e.target.value);
             document.getElementById("brushSizeValue").textContent = brushSize;
         });
-
+        
         document.getElementById("layerPrevBtn").addEventListener("click", () => {
             if (currentLayer > 0) currentLayer--;
             updateLayerLabel();
@@ -823,7 +1099,6 @@
                 if (is3DInitialized) update3DView();
             }
         });
-
         document.getElementById("copyLayerAddBtn").addEventListener("click", () => {
             saveStateForUndo();
             const copyLayer = voxelData[currentLayer].map(row => row.slice());
@@ -835,7 +1110,6 @@
             renderGrid();
             if (is3DInitialized) update3DView();
         });
-
         document.getElementById("show2dBtn").addEventListener("click", () => {
             rendererContainer.style.display = "none";
             gridContainer.style.display = "block";
@@ -848,11 +1122,9 @@
             gridContainer.style.display = "none";
             update3DView();
         });
-
         document.getElementById("saveJsonBtn").addEventListener("click", saveJSON);
         document.getElementById("saveObjBtn").addEventListener("click", saveOBJ);
         document.getElementById("undoBtn").addEventListener("click", undo);
-
         document.getElementById("scrollUp").addEventListener("click", () => {
             gridContainer.scrollBy(0, -50);
         });
@@ -865,7 +1137,6 @@
         document.getElementById("scrollRight").addEventListener("click", () => {
             gridContainer.scrollBy(50, 0);
         });
-
         document.getElementById("save3dImageBtn").addEventListener("click", () => {
             if (!is3DInitialized) return;
             renderer.render(scene, camera);
@@ -875,18 +1146,14 @@
             a.download = `voxel_3dview.png`;
             a.click();
         });
-
         const importJsonInput = document.getElementById('importJsonInput');
-
         importJsonInput.addEventListener('change', e => {
             const file = e.target.files[0];
             if (!file) return;
-
             const reader = new FileReader();
             reader.onload = () => {
                 try {
                     const data = JSON.parse(reader.result);
-
                     if (
                         typeof data.width === 'number' &&
                         typeof data.height === 'number' &&
@@ -897,11 +1164,9 @@
                         height = data.height;
                         depth = data.depth;
                         voxelData = data.voxelData;
-
                         document.getElementById("inputWidth").value = width;
                         document.getElementById("inputHeight").value = height;
                         document.getElementById("inputDepth").value = depth;
-
                         currentLayer = 0;
                         updateLayerLabel();
                         renderGrid();
@@ -914,17 +1179,14 @@
                     console.error(err);
                 }
             };
-            reader.readAsText(file);
             importJsonInput.value = "";
         });
-
         function resizeVoxelData(newW, newH, newD) {
             const newData = Array.from({ length: newH }, () =>
                 Array.from({ length: newD }, () =>
                     Array.from({ length: newW }, () => null)
                 )
             );
-
             for (let y = 0; y < Math.min(height, newH); y++) {
                 for (let z = 0; z < Math.min(depth, newD); z++) {
                     for (let x = 0; x < Math.min(width, newW); x++) {
@@ -934,12 +1196,6 @@
             }
             voxelData = newData;
         }
-
-        // ★★★ 追加するコードはここから ★★★
-
-        const convertImageTo3dBtn = document.getElementById('convertImageTo3dBtn');
-        const sideSelectionDiv = document.getElementById('sideSelection');
-        const cancelBtn = document.getElementById('cancelBtn');
 
         convertImageTo3dBtn.addEventListener('click', () => {
             if (!overlayImage) {
@@ -963,20 +1219,16 @@
         function convertImageTo3d(side) {
             if (!overlayImage) return;
             saveStateForUndo();
-
             const img = new Image();
             img.crossOrigin = 'Anonymous';
             img.src = overlayImage.src;
-
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-
-                let finalW, finalH, offsetX, offsetY;
+                let finalW, finalH;
                 const gridW = width;
                 const gridD = depth;
                 const gridH = height;
-
                 if (side === 'front' || side === 'back') {
                     finalW = gridW;
                     finalH = gridH;
@@ -987,28 +1239,18 @@
                     finalW = gridW;
                     finalH = gridD;
                 }
-
                 const imgRatio = img.width / img.height;
                 const gridRatio = finalW / finalH;
-
                 if (imgRatio > gridRatio) {
-                    finalW = finalW;
                     finalH = finalW / imgRatio;
                 } else {
-                    finalH = finalH;
                     finalW = finalH * imgRatio;
                 }
-
                 canvas.width = Math.round(finalW);
                 canvas.height = Math.round(finalH);
-
                 ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
                 const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
                 const data = imageData.data;
-
-                const startY = Math.round((height - canvas.height) / 2);
-
                 for (let y = 0; y < canvas.height; y++) {
                     for (let x = 0; x < canvas.width; x++) {
                         const index = (y * canvas.width + x) * 4;
@@ -1016,13 +1258,9 @@
                         const g = data[index + 1];
                         const b = data[index + 2];
                         const a = data[index + 3];
-
                         if (a === 0) continue;
-
                         let voxelX, voxelY, voxelZ;
                         const hexColor = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-
-                        // 面に応じた座標の計算
                         if (side === 'front') {
                             voxelX = x;
                             voxelY = height - 1 - (y);
@@ -1048,24 +1286,21 @@
                             voxelY = 0;
                             voxelZ = y;
                         }
-
                         if (voxelX >= 0 && voxelX < width && voxelY >= 0 && voxelY < height && voxelZ >= 0 && voxelZ < depth) {
                             voxelData[voxelY][voxelZ][voxelX] = hexColor;
                         }
                     }
                 }
-                
                 renderGrid();
                 if (is3DInitialized) update3DView();
             };
         };
 
-        // ★★★ 追加するコードはここまで ★★★
-
         // 初期化
         initData();
         updateLayerLabel();
         renderGrid();
+        setMode('draw');
 
         window.addEventListener('resize', () => {
             if (is3DInitialized) {
