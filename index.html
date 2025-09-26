@@ -412,7 +412,7 @@
             cells.flat().forEach(cell => {
                 cell.classList.remove('selecting-cell');
             });
-            renderGrid();
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
         }
         
         function getCellFromPoint(clientX, clientY) {
@@ -466,7 +466,7 @@
                 selectedCells.forEach(cell => {
                     voxelData[currentLayer][cell.z][cell.x] = null;
                 });
-                renderGrid();
+                updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
                 selectionBox.style.display = 'block';
                 selectionBox.classList.add('moving-box');
                 setMode('move');
@@ -667,7 +667,7 @@
                 }
             });
             selectedCells = newSelectedCells;
-            renderGrid();
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
             if (is3DInitialized) update3DView();
         }
         function saveStateForUndo() {
@@ -683,7 +683,7 @@
             if (undoStack.length === 0) return;
             voxelData = undoStack.pop();
             if (currentLayer >= height) currentLayer = height - 1;
-            renderGrid();
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
             updateLayerLabel();
             if (is3DInitialized) update3DView();
         }
@@ -723,12 +723,15 @@
             }
         }
         function updateGridColors() {
+            // Fix: Only update the colors of existing cells
+            if (cells.length === 0) return;
             for (let z = 0; z < depth; z++) {
                 for (let x = 0; x < width; x++) {
+                    const cell = cells[z][x];
                     const color = voxelData[currentLayer][z][x];
-                    cells[z][x].style.backgroundColor = color ?? "transparent";
+                    cell.style.backgroundColor = color ?? "transparent";
                     const isSelected = selectedCells.some(c => c.x === x && c.z === z);
-                    cells[z][x].classList.toggle('selected-cell', isSelected);
+                    cell.classList.toggle('selected-cell', isSelected);
                 }
             }
         }
@@ -751,7 +754,7 @@
                     }
                 }
             }
-            renderGrid();
+            updateGridColors(); // Fix: Only update the grid, not rebuild it
             if (is3DInitialized && rendererContainer.style.display === 'block') {
                 update3DView();
             }
@@ -909,8 +912,6 @@
                 obj += `usemtl ${matName}\n`;
                 obj += facesByMaterial[matName].join('\n') + '\n';
             }
-            zip.file("model.obj", obj);
-            zip.file("model.mtl", mtl);
             zip.generateAsync({ type: "blob" }).then(blob => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
@@ -1077,12 +1078,12 @@
         document.getElementById("layerPrevBtn").addEventListener("click", () => {
             if (currentLayer > 0) currentLayer--;
             updateLayerLabel();
-            renderGrid();
+            updateGridColors(); // Fix: Only update grid colors
         });
         document.getElementById("layerNextBtn").addEventListener("click", () => {
             if (currentLayer < height - 1) currentLayer++;
             updateLayerLabel();
-            renderGrid();
+            updateGridColors(); // Fix: Only update grid colors
         });
         document.getElementById("resizeBtn").addEventListener("click", () => {
             const newW = parseInt(document.getElementById("inputWidth").value);
@@ -1094,7 +1095,8 @@
                 width = newW; height = newH; depth = newD;
                 if (currentLayer >= height) currentLayer = height - 1;
                 updateLayerLabel();
-                renderGrid();
+                initGrid(); // Re-initialize the grid on resize
+                renderGrid(); // Call renderGrid to update
                 if (is3DInitialized) update3DView();
             }
         });
@@ -1106,6 +1108,8 @@
             if (currentLayer < height - 1) currentLayer++;
             document.getElementById("inputHeight").value = height;
             updateLayerLabel();
+            resizeVoxelData(width, height, depth); // Update voxelData structure
+            initGrid(); // Re-initialize grid on structural change
             renderGrid();
             if (is3DInitialized) update3DView();
         });
@@ -1168,7 +1172,8 @@
                         document.getElementById("inputDepth").value = depth;
                         currentLayer = 0;
                         updateLayerLabel();
-                        renderGrid();
+                        initGrid(); // Fix: Initialize grid after loading new data
+                        updateGridColors(); // Fix: Update colors after init
                         if (is3DInitialized) update3DView();
                     } else {
                         alert("不正なJSONデータです。");
@@ -1177,8 +1182,9 @@
                     alert("JSONの読み込みに失敗しました。");
                     console.error(err);
                 }
+                importJsonInput.value = ""; // Fix: Clear the value after processing the file
             };
-            importJsonInput.value = "";
+            reader.readAsText(file); // Fix: Add this line to read the file
         });
         function resizeVoxelData(newW, newH, newD) {
             const newData = Array.from({ length: newH }, () =>
@@ -1189,7 +1195,7 @@
             for (let y = 0; y < Math.min(height, newH); y++) {
                 for (let z = 0; z < Math.min(depth, newD); z++) {
                     for (let x = 0; x < Math.min(width, newW); x++) {
-                        newData[y][z][x] = voxelData[y][z][x];
+                        newData[y][z][x] = voxelData[y]?.[z]?.[x] || null;
                     }
                 }
             }
@@ -1286,14 +1292,15 @@
                         }
                     }
                 }
-                renderGrid();
+                updateGridColors(); // Fix: Update grid colors after conversion
                 if (is3DInitialized) update3DView();
             };
         };
 
         initData();
         updateLayerLabel();
-        renderGrid();
+        initGrid();
+        updateGridColors();
         setMode('draw');
         window.addEventListener('resize', () => {
             if (is3DInitialized) {
