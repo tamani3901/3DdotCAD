@@ -30,8 +30,9 @@
             flex-wrap: wrap;
         }
         .tab-content {
+            /* flex-wrap: wrap; が横並びと折り返しを制御しています */
             display: none;
-            flex-wrap: wrap;
+            flex-wrap: wrap; 
             gap: 10px;
             padding: 5px 0;
             align-items: center;
@@ -234,6 +235,7 @@ value="#ff0000" />
             <button id="pasteBtn">ペースト</button>
             <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
         </div>
+
         <div id="insertTab" class="tab-content">
             <input type="file" id="importJsonInput" accept=".json" style="display:none;"
 />
@@ -358,7 +360,7 @@ value="#ff0000" />
         const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
         const selectionBox = document.getElementById('selection-box');
         
-        // クリップボード/レイヤー操作ボタンの追加 (ここが変更点)
+        // クリップボード/レイヤー操作ボタンの取得 (ここも修正済み)
         const copyBtn = document.getElementById('copyBtn');
         const cutBtn = document.getElementById('cutBtn');
         const pasteBtn = document.getElementById('pasteBtn');
@@ -949,6 +951,8 @@ color = voxelData[y][z][x];
                 obj += `usemtl ${matName}\n`;
                 obj += facesByMaterial[matName].join('\n') + '\n';
             }
+            zip.file("model.obj", obj);
+            zip.file("model.mtl", mtl);
             zip.generateAsync({ type: "blob" }).then(blob => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
