@@ -13,11 +13,25 @@
         }
         #controls {
             display: flex;
-            flex-wrap: wrap;
+            flex-direction: column; /* 縦並びにする */
             gap: 10px;
             padding: 10px;
             background: #333;
+        }
+        #tab-buttons {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .tab-content {
+            display: none;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 5px 0;
             align-items: center;
+        }
+        .tab-content.active {
+            display: flex;
         }
         #controls button,
         #controls input[type="color"],
@@ -32,8 +46,12 @@
             color: #fff;
             cursor: pointer;
         }
-        #controls button:hover {
+        #controls button:hover,
+        .custom-file-label:hover {
             background-color: #666;
+        }
+        .tab-button.active {
+            background-color: #007bff;
         }
         #grid-container {
             width: 80vw;
@@ -68,8 +86,6 @@
             background-color: rgba(255, 255, 255, 0.2);
             pointer-events: none;
         }
-
-        /* ★★★ 選択範囲のスタイルを修正・追加 ★★★ */
         #selection-box {
             position: absolute;
             background-color: rgba(0, 100, 255, 0.4);
@@ -77,20 +93,14 @@
             pointer-events: none;
             z-index: 50;
         }
-        .selecting-cell {
+        .selecting-cell, .selected-cell, .moving-box {
             opacity: 0.8;
             border: 1px solid rgba(255, 255, 255, 0.8) !important;
-        }
-        .selected-cell {
-            opacity: 0.8;
-            border: 1px dashed rgba(255, 255, 255, 0.8) !important;
         }
         .moving-box {
             background-color: rgba(255, 255, 255, 0.1) !important;
             border: 2px dashed rgba(255, 255, 255, 0.8) !important;
         }
-
-
         #renderer-container {
             display: none;
             width: 80vw;
@@ -181,38 +191,62 @@
 </head>
 <body>
     <div id="controls">
-        <input type="color" id="colorPicker" value="#ff0000" />
-        <button id="drawBtn">描画</button>
-        <button id="eraseBtn">消去</button>
-        <button id="selectBtn">選択</button>
-        <button id="completeSelectionBtn" style="display:none;">選択完了</button>
-        <button id="cancelSelectionBtn" style="display:none;">キャンセル</button>
-        <input type="range" id="brushSize" min="1" max="5" value="1" />
-        <span id="brushSizeValue">1</span>
-        <button id="layerPrevBtn">↑</button>
-        <button id="layerNextBtn">↓</button>
-        <span id="layerLabel"></span>
-        <input type="number" id="inputWidth" value="16" min="1" max="64" />
-        <input type="number" id="inputHeight" value="16" min="1" max="64" />
-        <input type="number" id="inputDepth" value="16" min="1" max="64" />
-        <button id="resizeBtn">サイズ変更</button>
-        <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
-        <button id="show2dBtn">2D表示</button>
-        <button id="show3dBtn">3D表示</button>
-        <button id="saveJsonBtn">JSON保存</button>
-        <button id="saveObjBtn">OBJ保存</button>
-        <button id="save3dImageBtn">3D画像保存</button>
-        <input type="file" id="importJsonInput" accept=".json" style="display:none;" />
-        <label for="importJsonInput" class="custom-file-label">JSONインポート</label>
+        <div id="tab-buttons">
+            <button class="tab-button active" data-tab="drawTab">描画</button>
+            <button class="tab-button" data-tab="selectMoveTab">選択移動</button>
+            <button class="tab-button" data-tab="insertTab">挿入</button>
+            <button class="tab-button" data-tab="convertTab">変換</button>
+            <button class="tab-button" data-tab="exportTab">エクスポート</button>
+        </div>
 
-        <input type="file" id="imageInput" accept="image/*" style="display:none;" />
-        <label for="imageInput" class="custom-file-label">画像インポート</label>
-        <button id="convertImageTo3dBtn">画像3D変換</button>
-        <input type="number" id="imgWidth" value="100" style="width: 60px;" />×
-        <input type="number" id="imgHeight" value="100" style="width: 60px;" />
-        <button id="applyImageSize">画像サイズ変更</button>
-        <button id="toggleMoveImage">画像移動モード: OFF</button>
-        <button id="deleteImageBtn">画像削除</button>
+        <div id="drawTab" class="tab-content active">
+            <input type="color" id="colorPicker" value="#ff0000" />
+            <button id="drawBtn">描画</button>
+            <button id="eraseBtn">消去</button>
+            <input type="range" id="brushSize" min="1" max="5" value="1" />
+            <span id="brushSizeValue">1</span>
+            </div>
+
+        <div id="selectMoveTab" class="tab-content">
+            <button id="selectBtn">選択</button>
+            <button id="completeSelectionBtn" style="display:none;">選択完了</button>
+            <button id="cancelSelectionBtn" style="display:none;">キャンセル</button>
+        </div>
+
+        <div id="insertTab" class="tab-content">
+            <input type="file" id="importJsonInput" accept=".json" style="display:none;" />
+            <label for="importJsonInput" class="custom-file-label">JSONインポート</label>
+            <input type="file" id="imageInput" accept="image/*" style="display:none;" />
+            <label for="imageInput" class="custom-file-label">画像インポート</label>
+        </div>
+
+        <div id="convertTab" class="tab-content">
+            <button id="convertImageTo3dBtn">画像3D変換</button>
+            <input type="number" id="imgWidth" value="100" style="width: 60px;" />×
+            <input type="number" id="imgHeight" value="100" style="width: 60px;" />
+            <button id="applyImageSize">画像サイズ変更</button>
+            <button id="toggleMoveImage">画像移動モード: OFF</button>
+            <button id="deleteImageBtn">画像削除</button>
+        </div>
+
+        <div id="exportTab" class="tab-content">
+            <button id="saveObjBtn">OBJエクスポート</button>
+            <button id="saveJsonBtn">JSONエクスポート</button>
+            <button id="save3dImageBtn">スクショ</button>
+        </div>
+        
+        <div style="display: flex; gap: 10px; flex-wrap: wrap; padding-top: 10px;">
+            <button id="show2dBtn">2D表示</button>
+            <button id="show3dBtn">3D表示</button>
+            <input type="number" id="inputWidth" value="16" min="1" max="64" />
+            <input type="number" id="inputHeight" value="16" min="1" max="64" />
+            <input type="number" id="inputDepth" value="16" min="1" max="64" />
+            <button id="resizeBtn">サイズ変更</button>
+            <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
+            <button id="layerPrevBtn">↑</button>
+            <button id="layerNextBtn">↓</button>
+            <span id="layerLabel"></span>
+        </div>
     </div>
 
     <div id="grid-container">
@@ -295,8 +329,7 @@
         const sideSelectionDiv = document.getElementById('sideSelection');
         const cancelBtn = document.getElementById('cancelBtn');
 
-        // ★★★ 選択移動機能の追加/変更 ★★★
-        let currentMode = 'draw'; // 'draw', 'erase', 'select', 'move'
+        let currentMode = 'draw';
         let isDrawing = false;
         let isSelecting = false;
         let isMoving = false;
@@ -313,15 +346,47 @@
         const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
         const selectionBox = document.getElementById('selection-box');
         
+        // --- タブ切り替えのロジックを追加 ---
+        const tabButtons = document.querySelectorAll('.tab-button');
+        const tabContents = document.querySelectorAll('.tab-content');
+
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                // すべてのタブボタンとコンテンツを非アクティブにする
+                tabButtons.forEach(btn => btn.classList.remove('active'));
+                tabContents.forEach(content => content.classList.remove('active'));
+
+                // 押されたボタンと対応するコンテンツをアクティブにする
+                button.classList.add('active');
+                const targetTab = document.getElementById(button.dataset.tab);
+                if (targetTab) {
+                    targetTab.classList.add('active');
+                }
+                
+                // タブ切り替え時にモードをリセット
+                if (button.dataset.tab === 'drawTab') {
+                    setMode('draw');
+                } else if (button.dataset.tab === 'selectMoveTab') {
+                    setMode('select');
+                } else {
+                    setMode('none'); // その他のタブではモードを無効化
+                }
+            });
+        });
+        
         function setMode(mode) {
             currentMode = mode;
-            // ボタンの表示を切り替える
-            drawBtn.style.backgroundColor = '';
-            eraseBtn.style.backgroundColor = '';
-            selectBtn.style.backgroundColor = '';
+            // 描画/消去/選択のUIを適切に表示・非表示
+            drawBtn.style.display = 'inline-block';
+            eraseBtn.style.display = 'inline-block';
+            selectBtn.style.display = 'inline-block';
             completeSelectionBtn.style.display = 'none';
             cancelSelectionBtn.style.display = 'none';
 
+            // ボタンのアクティブ状態を更新
+            document.querySelectorAll('#drawTab button').forEach(btn => btn.style.backgroundColor = '');
+            document.querySelectorAll('#selectMoveTab button').forEach(btn => btn.style.backgroundColor = '');
+            
             if (mode === 'draw') {
                 drawBtn.style.backgroundColor = '#666';
             } else if (mode === 'erase') {
@@ -372,18 +437,15 @@
             setMode('draw');
         });
         eraseBtn.addEventListener('click', () => {
-            isErasing = true; // ★修正箇所
+            isErasing = true;
             setMode('erase');
         });
-
         cancelSelectionBtn.addEventListener('click', () => {
             clearSelection();
-            setMode('draw');
+            setMode('select'); // 選択タブ内なので、選択モードに戻る
         });
-        
         completeSelectionBtn.addEventListener('click', () => {
             if (isSelecting) {
-                // 選択範囲の確定
                 isSelecting = false;
                 const rect = selectionBox.getBoundingClientRect();
                 const gridRect = grid.getBoundingClientRect();
@@ -391,11 +453,8 @@
                 const startZ = Math.round((rect.top - gridRect.top) / 20);
                 const endX = startX + Math.round(rect.width / 20) - 1;
                 const endZ = startZ + Math.round(rect.height / 20) - 1;
-
                 selectedCells = [];
                 selectedVoxelData = [];
-                
-                // 選択範囲内のボクセルデータを保存
                 for (let z = startZ; z <= endZ; z++) {
                     for (let x = startX; x <= endX; x++) {
                         const color = voxelData[currentLayer][z][x];
@@ -405,12 +464,9 @@
                         }
                     }
                 }
-                
-                // 元の場所を消去
                 selectedCells.forEach(cell => {
                     voxelData[currentLayer][cell.z][cell.x] = null;
                 });
-                
                 renderGrid();
                 selectionBox.style.display = 'block';
                 selectionBox.classList.add('moving-box');
@@ -418,12 +474,10 @@
                 return;
             }
             if (currentMode === 'move' && selectedCells.length > 0) {
-                // 移動完了後、選択モードを終了
                 clearSelection();
-                setMode('draw');
+                setMode('select'); // 選択タブ内なので、選択モードに戻る
             }
         });
-
         grid.addEventListener('mousedown', (e) => {
             const cell = e.target.closest('.cell');
             if (!cell) return;
@@ -435,7 +489,6 @@
                 isDrawing = true;
                 paintCells(x, z);
             } else if (currentMode === 'select') {
-                // 選択開始
                 isSelecting = true;
                 startCellX = x;
                 startCellZ = z;
@@ -447,7 +500,6 @@
                 selectionBox.style.height = '0px';
                 e.preventDefault();
             } else if (currentMode === 'move') {
-                // 移動開始
                 const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
                 if (cellIndex !== -1) {
                     isMoving = true;
@@ -458,13 +510,11 @@
                     movingStartGridZ = parseInt(selectionBox.style.top) / 20;
                     e.preventDefault();
                 } else {
-                    // 選択範囲外をクリックしたらリセット
                     clearSelection();
-                    setMode('draw');
+                    setMode('select'); // 選択タブ内なので、選択モードに戻る
                 }
             }
         });
-
         grid.addEventListener('mousemove', (e) => {
             if (currentMode === 'draw' || currentMode === 'erase') {
                 if (!isDrawing) return;
@@ -505,7 +555,6 @@
                 selectionBox.style.top = `${newZ * 20}px`;
             }
         });
-
         window.addEventListener('mouseup', (e) => {
             isDrawing = false;
             if (currentMode === 'move' && isMoving) {
@@ -515,8 +564,6 @@
                 isMoving = false;
             }
         });
-        
-        // タッチイベントの追加
         grid.addEventListener('touchstart', (e) => {
             const cell = getCellFromPoint(e.touches[0].clientX, e.touches[0].clientY);
             if (!cell) return;
@@ -550,11 +597,10 @@
                     e.preventDefault();
                 } else {
                     clearSelection();
-                    setMode('draw');
+                    setMode('select');
                 }
             }
         }, { passive: false });
-
         grid.addEventListener('touchmove', (e) => {
             if (currentMode === 'draw' || currentMode === 'erase') {
                 if (!isDrawing) return;
@@ -600,7 +646,6 @@
                 selectionBox.style.top = `${newZ * 20}px`;
             }
         }, { passive: false });
-        
         window.addEventListener('touchend', (e) => {
             isDrawing = false;
             if (currentMode === 'move' && isMoving) {
@@ -610,12 +655,8 @@
                 isMoving = false;
             }
         });
-
-        // 選択されたボクセルを移動する関数
         function moveSelectedCells(dx, dy) {
             if (selectedVoxelData.length === 0) return;
-            
-            // 新しい位置にボクセルを配置
             const newSelectedCells = [];
             selectedVoxelData.forEach(voxel => {
                 const newX = movingStartGridX + voxel.x + dx;
@@ -626,14 +667,10 @@
                     newSelectedCells.push({ x: newX, z: newZ });
                 }
             });
-
             selectedCells = newSelectedCells;
             renderGrid();
             if (is3DInitialized) update3DView();
         }
-
-        // --- 既存の関数 ---
-
         function saveStateForUndo() {
             const clone = voxelData.map(layer =>
                 layer.map(row =>
@@ -643,7 +680,6 @@
             undoStack.push(clone);
             if (undoStack.length > 20) undoStack.shift();
         }
-
         function undo() {
             if (undoStack.length === 0) return;
             voxelData = undoStack.pop();
@@ -652,7 +688,6 @@
             updateLayerLabel();
             if (is3DInitialized) update3DView();
         }
-
         function initData() {
             voxelData = Array.from({ length: height }, () =>
                 Array.from({ length: depth }, () =>
@@ -660,13 +695,11 @@
                 )
             );
         }
-
         function initGrid() {
             grid.innerHTML = "";
             cells = [];
             grid.style.gridTemplateColumns = `repeat(${width}, 20px)`;
             grid.style.gridTemplateRows = `repeat(${depth}, 20px)`;
-
             for (let z = 0; z < depth; z++) {
                 const row = [];
                 for (let x = 0; x < width; x++) {
@@ -674,26 +707,22 @@
                     cell.className = "cell";
                     cell.dataset.x = x;
                     cell.dataset.z = z;
-
                     const highlight = document.createElement("div");
                     highlight.className = "cell-highlight";
                     highlight.style.display = "none";
                     cell.appendChild(highlight);
-
                     cell.addEventListener("mouseenter", () => {
                         highlight.style.display = "block";
                     });
                     cell.addEventListener("mouseleave", () => {
                         highlight.style.display = "none";
                     });
-
                     grid.appendChild(cell);
                     row.push(cell);
                 }
                 cells.push(row);
             }
         }
-
         function updateGridColors() {
             for (let z = 0; z < depth; z++) {
                 for (let x = 0; x < width; x++) {
@@ -704,7 +733,6 @@
                 }
             }
         }
-
         function renderGrid() {
             if (cells.length === 0 || cells.length !== depth || (cells[0] && cells[0].length !== width)) {
                 initGrid();
@@ -712,7 +740,6 @@
             updateGridColors();
             updateImagePositionAndLayer();
         }
-
         function paintCells(centerX, centerZ) {
             saveStateForUndo();
             const halfSize = Math.floor(brushSize / 2);
@@ -730,11 +757,9 @@
                 update3DView();
             }
         }
-
         function updateLayerLabel() {
             layerLabel.textContent = `レイヤー: ${currentLayer + 1} / ${height}`;
         }
-
         function init3DView() {
             scene = new THREE.Scene();
             scene.background = new THREE.Color(0x222222);
@@ -761,7 +786,6 @@
             update3DView();
             animate();
         }
-
         function update3DView() {
             voxelMeshes.forEach(m => scene.remove(m));
             voxelMeshes = [];
@@ -786,7 +810,6 @@
                 }
             }
         }
-
         let lastAnimateLog = 0;
         function animate(time) {
             requestAnimationFrame(animate);
@@ -796,7 +819,6 @@
                 lastAnimateLog = time;
             }
         }
-
         function saveJSON() {
             const data = {
                 width, height, depth,
@@ -810,7 +832,6 @@
             a.click();
             URL.revokeObjectURL(url);
         }
-
         function saveOBJ() {
             const zip = new JSZip();
             let obj = "mtllib model.mtl\n";
@@ -900,7 +921,6 @@
                 URL.revokeObjectURL(url);
             });
         }
-        
         imageInput.addEventListener('change', (e) => {
             if (!e.target.files || e.target.files.length === 0) return;
             const file = e.target.files[0];
@@ -923,7 +943,6 @@
             reader.readAsDataURL(file);
             imageInput.value = '';
         });
-
         applyImageSizeBtn.addEventListener('click', () => {
             if (!overlayImage) return;
             let w = parseInt(imgWidthInput.value);
@@ -933,7 +952,6 @@
             overlayImage.style.width = w + 'px';
             overlayImage.style.height = h + 'px';
         });
-
         toggleMoveImageBtn.addEventListener('click', () => {
             if (!overlayImage) return;
             isImageMoveMode = !isImageMoveMode;
@@ -953,7 +971,6 @@
                 overlayImage.style.cursor = 'default';
             }
         });
-
         deleteImageBtn.addEventListener('click', () => {
             if (overlayImage) {
                 overlayImage.remove();
@@ -962,7 +979,6 @@
                 toggleMoveImageBtn.textContent = "画像移動モード: OFF";
             }
         });
-
         gridWrapper.addEventListener('mousedown', (e) => {
             if (!isImageMoveMode || !overlayImage) return;
             if (e.target !== overlayImage) return;
@@ -1022,7 +1038,6 @@
         window.addEventListener('touchend', () => {
             dragging = false;
         });
-
         function updateImagePositionAndLayer() {
             if (!overlayImage) return;
             if (isImageMoveMode) {
@@ -1035,7 +1050,6 @@
                 overlayImage.style.pointerEvents = 'none';
             }
         }
-
         document.getElementById("resetBtn").addEventListener("click", () => {
             if (confirm("本当にリセットする？未保存のデータは消えるよ？")) {
                 saveStateForUndo();
@@ -1052,7 +1066,6 @@
                 }
             }
         });
-
         document.getElementById("colorPicker").addEventListener("input", e => {
             drawColor = e.target.value;
             isErasing = false;
@@ -1062,7 +1075,6 @@
             brushSize = parseInt(e.target.value);
             document.getElementById("brushSizeValue").textContent = brushSize;
         });
-        
         document.getElementById("layerPrevBtn").addEventListener("click", () => {
             if (currentLayer > 0) currentLayer--;
             updateLayerLabel();
@@ -1073,7 +1085,6 @@
             updateLayerLabel();
             renderGrid();
         });
-
         document.getElementById("resizeBtn").addEventListener("click", () => {
             const newW = parseInt(document.getElementById("inputWidth").value);
             const newH = parseInt(document.getElementById("inputHeight").value);
@@ -1185,7 +1196,6 @@
             }
             voxelData = newData;
         }
-
         convertImageTo3dBtn.addEventListener('click', () => {
             if (!overlayImage) {
                 alert("先に画像をインポートしてください。");
@@ -1193,18 +1203,15 @@
             }
             sideSelectionDiv.style.display = 'block';
         });
-
         cancelBtn.addEventListener('click', () => {
             sideSelectionDiv.style.display = 'none';
         });
-
         sideSelectionDiv.addEventListener('click', (e) => {
             if (e.target.tagName === 'BUTTON' && e.target.dataset.side) {
                 sideSelectionDiv.style.display = 'none';
                 convertImageTo3d(e.target.dataset.side);
             }
         });
-
         function convertImageTo3d(side) {
             if (!overlayImage) return;
             saveStateForUndo();
@@ -1290,7 +1297,6 @@
         updateLayerLabel();
         renderGrid();
         setMode('draw');
-
         window.addEventListener('resize', () => {
             if (is3DInitialized) {
                 renderer.setSize(rendererContainer.clientWidth, rendererContainer.clientHeight);
