@@ -246,7 +246,6 @@
             <input type="range" id="brushSize" min="1" max="5" value="1" />
             <span id="brushSizeValue">1</span>
             
-            <hr style="width: 100%; border-color: #555;">
             <button id="shapeSquareBtn" data-shape="square">四角</button>
             <button id="shapeCircleBtn" data-shape="circle">円</button>
             <button id="shapeTriangleBtn" data-shape="triangle">三角</button>
@@ -265,9 +264,8 @@
             <button id="selectBtn">選択</button>
             <button id="completeSelectionBtn" style="display:none;">選択完了/確定</button>
             <button id="cancelSelectionBtn" style="display:none;">キャンセル</button>
-            <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
             
-            <hr style="width: 100%; border-color: #555;">
+            <hr style="width: 100%; border-color: #555;"> <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
             <button id="copyBtn">コピー</button>
             <button id="cutBtn">カット</button>
             <button id="pasteBtn">ペースト</button>
@@ -400,6 +398,10 @@
         const completeSelectionBtn = document.getElementById('completeSelectionBtn');
         const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
         const selectionBox = document.getElementById('selection-box');
+        
+        // --- 1. ペンの太さ関連のDOM要素と修正 ---
+        const brushSizeInput = document.getElementById('brushSize');
+        const brushSizeValueSpan = document.getElementById('brushSizeValue');
         
         // ④、⑤ 新しいDOM要素
         const shapeSquareBtn = document.getElementById('shapeSquareBtn');
@@ -536,7 +538,7 @@
             setMode('select');
         });
         
-        // ② 選択完了/確定ボタンのロジック修正
+        // ② 選択完了/確定ボタンのロジック修正 (移動確定時にも使用)
         completeSelectionBtn.addEventListener('click', () => {
             if (isSelecting) {
                 // SlectモードからMoveモードへ（選択完了）
@@ -583,7 +585,7 @@
                 const currentGridX = parseInt(selectionBox.style.left) / 20;
                 const currentGridZ = parseInt(selectionBox.style.top) / 20;
                 
-                // オリジナルの位置のデータをクリア
+                // オリジナルの位置のデータをクリア (カット操作または、ペースト後の再配置確定の場合)
                 originalSelectedCells.forEach(cell => {
                     voxelData[currentLayer][cell.z][cell.x] = null;
                 });
@@ -679,7 +681,13 @@
                 e.preventDefault();
             } else if (currentMode === 'move') {
                 const cellIndex = originalSelectedCells.findIndex(c => c.x === x && c.z === z);
-                if (cellIndex !== -1) {
+                // 移動モードの際は、プレビューボックス内ならどこでも移動開始を許可
+                const gridRect = grid.getBoundingClientRect();
+                const selRect = selectionBox.getBoundingClientRect();
+                const inSelectionBox = (e.clientX > selRect.left && e.clientX < selRect.right && 
+                                        e.clientY > selRect.top && e.clientY < selRect.bottom);
+
+                if (inSelectionBox || cellIndex !== -1) {
                     isMoving = true;
                     saveStateForUndo();
                     movingStartMouseX = e.clientX;
@@ -767,7 +775,14 @@
                 e.preventDefault();
             } else if (currentMode === 'move') {
                 const cellIndex = originalSelectedCells.findIndex(c => c.x === x && c.z === z);
-                if (cellIndex !== -1) {
+                
+                // タッチイベントの場合は、selectionBoxが動いている領域にタッチしていればOKとする
+                const touch = e.touches[0];
+                const selRect = selectionBox.getBoundingClientRect();
+                const inSelectionBox = (touch.clientX > selRect.left && touch.clientX < selRect.right && 
+                                        touch.clientY > selRect.top && touch.clientY < selRect.bottom);
+
+                if (inSelectionBox || cellIndex !== -1) {
                     isMoving = true;
                     saveStateForUndo();
                     movingStartMouseX = e.touches[0].clientX;
@@ -1331,7 +1346,7 @@
 
         copyBtn.addEventListener('click', () => {
             if (selectedVoxelData.length === 0) {
-                alert('先に選択範囲を指定してください。');
+                alert('先に選択範囲を指定し、選択完了を押してください。');
                 return;
             }
             const startX = parseInt(selectionBox.style.left) / 20;
@@ -1346,7 +1361,7 @@
 
         cutBtn.addEventListener('click', () => {
             if (selectedVoxelData.length === 0) {
-                alert('先に選択範囲を指定してください。');
+                alert('先に選択範囲を指定し、選択完了を押してください。');
                 return;
             }
             saveStateForUndo();
@@ -1369,43 +1384,46 @@
             alert(`選択範囲（${selectedVoxelData.length}ボクセル）をカットし、クリップボードに保存しました。`);
         });
 
+        // ペーストして確定を押す前に移動ができるようにする（既存の Move モードへ移行するロジックを使用）
         pasteBtn.addEventListener('click', () => {
             if (!clipboardVoxelData) {
                 alert('クリップボードにデータがありません。');
                 return;
             }
-            saveStateForUndo();
+            // Undoスタックには、移動確定時（completeSelectionBtn）に保存する
             clearSelection(); // 現在の選択を解除
 
             const clipboardData = clipboardVoxelData.data;
-            const width = Math.max(...clipboardData.map(v => v.x)) - Math.min(...clipboardData.map(v => v.x)) + 1;
-            const height = Math.max(...clipboardData.map(v => v.z)) - Math.min(...clipboardData.map(v => v.z)) + 1;
+            const minX = Math.min(...clipboardData.map(v => v.x));
+            const maxX = Math.max(...clipboardData.map(v => v.x));
+            const minZ = Math.min(...clipboardData.map(v => v.z));
+            const maxZ = Math.max(...clipboardData.map(v => v.z));
+            const contentWidth = maxX - minX + 1;
+            const contentHeight = maxZ - minZ + 1;
 
             // 画面中心付近にペーストするために、オフセットを再計算
-            const centerGridX = Math.floor(width / 2) - Math.floor(width / 2);
-            const centerGridZ = Math.floor(depth / 2) - Math.floor(height / 2);
+            const centerGridX = Math.floor(width / 2) - Math.floor(contentWidth / 2);
+            const centerGridZ = Math.floor(depth / 2) - Math.floor(contentHeight / 2);
             
             selectedVoxelData = clipboardData.map(v => ({ x: v.x, z: v.z, color: v.color }));
-            originalSelectedCells = [];
+            originalSelectedCells = []; // Pasteの場合は元の場所のデータがないためクリア
             selectedCells = [];
 
-            // データのペースト（新しい位置に配置）
+            // プレビュー用に、移動後の位置のセル座標を計算
             selectedVoxelData.forEach(voxel => {
                 const newX = centerGridX + voxel.x;
                 const newZ = centerGridZ + voxel.z;
                 
                 if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                    // voxelDataには一旦データを置かず、移動確定時にまとめて処理する
                     selectedCells.push({ x: newX, z: newZ, color: voxel.color });
-                    originalSelectedCells.push({ x: newX, z: newZ, color: voxel.color });
                 }
             });
 
             // プレビュー表示
             selectionBox.style.left = `${centerGridX * 20}px`;
             selectionBox.style.top = `${centerGridZ * 20}px`;
-            selectionBox.style.width = `${width * 20}px`;
-            selectionBox.style.height = `${height * 20}px`;
+            selectionBox.style.width = `${contentWidth * 20}px`;
+            selectionBox.style.height = `${contentHeight * 20}px`;
             selectionBox.style.display = 'block';
             selectionBox.classList.add('moving-box');
             
@@ -1413,12 +1431,9 @@
             movingStartGridX = centerGridX;
             movingStartGridZ = centerGridZ;
 
-            // Pasteされたデータは半透明表示にしないため、originalSelectedCellsをクリア
-            originalSelectedCells = [];
-
             setMode('move');
             updateGridColors();
-            alert('ペーストし、移動モードに移行しました。配置確定を押して完了してください。');
+            alert('ペーストデータを読み込みました。ドラッグして配置を移動し、「選択完了/確定」を押して完了してください。');
         });
 
         // --- Feature 6: 図形描画アルゴリズム ---
@@ -1560,6 +1575,11 @@
         // ⑤ キャンセルボタン
         cancelShapeBtn.addEventListener('click', () => setMode('draw'));
         
+        // --- 1. ペンの太さ機能の修正 ---
+        brushSizeInput.addEventListener('input', (e) => {
+            brushSize = parseInt(e.target.value);
+            brushSizeValueSpan.textContent = brushSize;
+        });
 
         initData();
         updateLayerLabel();
