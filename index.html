@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8" />
-    <title>Voxelエディタ with 画像機能フル版 (拡張)</title>
+    <title>Voxelエディタ with 画像機能フル版</title>
     <style>
         body {
             margin: 0;
@@ -103,9 +103,8 @@
             opacity: 0.8;
             border: 1px solid rgba(255, 255, 255, 0.8) !important;
         }
-        /* ② 選択完了時の半透明表示: 移動中のボックスの透明度を調整 */
         .moving-box {
-            background-color: rgba(0, 100, 255, 0.2) !important; /* より半透明に */
+            background-color: rgba(255, 255, 255, 0.1) !important;
             border: 2px dashed rgba(255, 255, 255, 0.8) !important;
         }
         #renderer-container {
@@ -149,9 +148,9 @@
             user-select: none;
         }
         .overlay-image.moving {
-            opacity: 1.0; /* 画像移動モード時は透過しない */
-            pointer-events: auto;
-            z-index: 25;
+            opacity: 0.5;
+            pointer-events: none;
+            z-index: 10;
             cursor: move;
         }
         .custom-file-label {
@@ -170,8 +169,7 @@
             background-color: #666;
         }
         #sideSelection {
-            /* 修正: 初期状態で非表示 */
-            display: none; 
+            display: none;
             position: fixed;
             top: 50%;
             left: 50%;
@@ -193,48 +191,6 @@
             color: #fff;
             border: none;
             border-radius: 4px;
-            cursor: pointer;
-        }
-
-        /* ④⑤ 図形コントロールのスタイル */
-        #shapeControls {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            padding: 20px;
-            background: #444;
-            border: 1px solid #666;
-            z-index: 1002; /* sideSelectionより上 */
-            border-radius: 8px;
-            text-align: center;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-        #shapeButtons button {
-             margin: 5px;
-             padding: 8px 15px;
-             background-color: #555;
-             color: #fff;
-             border: none;
-             border-radius: 4px;
-             cursor: pointer;
-        }
-        #shapeButtons button.active {
-            background-color: #007bff;
-        }
-        #shapeResizeControls {
-            display: flex;
-            justify-content: center;
-            gap: 10px;
-        }
-        #shapeControls button {
-            padding: 5px 10px;
-            border-radius: 4px;
-            background-color: #555;
-            color: #fff;
-            border: none;
             cursor: pointer;
         }
     </style>
@@ -266,15 +222,10 @@
             <button id="eraseBtn">消去</button>
             <input type="range" id="brushSize" min="1" max="5" value="1" />
             <span id="brushSizeValue">1</span>
-            <button id="shapeBtn">図形描画</button>
         </div>
 
         <div id="selectMoveTab" class="tab-content">
             <button id="selectBtn">選択</button>
-            <button id="copyBtn">コピー</button>
-            <button id="cutBtn">カット</button>
-            <button id="pasteBtn">ペースト</button>
-
             <button id="completeSelectionBtn" style="display:none;">選択完了</button>
             <button id="cancelSelectionBtn" style="display:none;">キャンセル</button>
             <button id="copyLayerAddBtn">レイヤーコピーして追加</button>
@@ -323,24 +274,6 @@
         <button data-side="top">上面</button>
         <button data-side="bottom">下面</button>
         <button id="cancelBtn">キャンセル</button>
-    </div>
-
-    <div id="shapeControls" style="display:none;">
-        <p>図形を選択してください:</p>
-        <div id="shapeButtons">
-            <button data-shape="square" class="shape-button active">四角</button>
-            <button data-shape="circle" class="shape-button">円</button>
-            <button data-shape="triangle" class="shape-button">三角</button>
-        </div>
-        <p>サイズ: <span id="shapeSizeValue">5</span></p>
-        <div id="shapeResizeControls">
-             <button id="shapeResizeM">-</button>
-             <button id="shapeResizeP">+</button>
-        </div>
-        <p id="rotationLabel" style="display:none;">回転:</p>
-        <button id="shapeRotate" style="display:none;">回転</button>
-        <button id="finalizeShapeBtn">決定</button>
-        <button id="cancelShapeBtn">キャンセル</button>
     </div>
 
     <div id="scrollButtons">
@@ -411,15 +344,6 @@
         let movingStartMouseX, movingStartMouseY;
         let movingStartGridX, movingStartGridZ;
 
-        // --- 新機能のためのグローバル変数 ---
-        let clipboardData = null; // ③ コピー/カット/ペースト用
-        let currentShapeType = 'square'; // ④ 図形プリセット
-        let currentShapeSize = 5;       // ⑤ 図形サイズ
-        let currentShapeRotation = 0;   // ⑤ 三角形回転 (0, 90, 180, 270)
-        let isShapeMode = false;        // ④ 図形モード
-        let shapePreviewVoxels = [];    // プレビュー用
-        let shapeBaseX, shapeBaseZ;     // 図形の中心座標（プレビュー用）
-
         const selectBtn = document.getElementById('selectBtn');
         const drawBtn = document.getElementById('drawBtn');
         const eraseBtn = document.getElementById('eraseBtn');
@@ -427,24 +351,10 @@
         const cancelSelectionBtn = document.getElementById('cancelSelectionBtn');
         const selectionBox = document.getElementById('selection-box');
         
-        // --- 新機能のUI要素の取得 ---
-        const shapeBtn = document.getElementById('shapeBtn');
-        const copyBtn = document.getElementById('copyBtn');
-        const cutBtn = document.getElementById('cutBtn');
-        const pasteBtn = document.getElementById('pasteBtn');
-        const shapeControls = document.getElementById('shapeControls');
-        const shapeButtons = document.querySelectorAll('#shapeButtons button');
-        const shapeSizeValue = document.getElementById('shapeSizeValue');
-        const shapeResizeP = document.getElementById('shapeResizeP');
-        const shapeResizeM = document.getElementById('shapeResizeM');
-        const shapeRotate = document.getElementById('shapeRotate');
-        const rotationLabel = document.getElementById('rotationLabel');
-        const finalizeShapeBtn = document.getElementById('finalizeShapeBtn');
-        const cancelShapeBtn = document.getElementById('cancelShapeBtn');
-
-        // --- タブ切り替えのロジック ---
+        // --- タブ切り替えのロジックを追加 ---
         const tabButtons = document.querySelectorAll('.tab-button');
         const tabContents = document.querySelectorAll('.tab-content');
+
         tabButtons.forEach(button => {
             button.addEventListener('click', () => {
                 tabButtons.forEach(btn => btn.classList.remove('active'));
@@ -457,10 +367,7 @@
                 }
                 
                 if (button.dataset.tab === 'drawTab') {
-                    // 図形モードでない限り、通常の描画モードにする
-                    if (!isShapeMode) {
-                        setMode('draw');
-                    }
+                    setMode('draw');
                 } else if (button.dataset.tab === 'selectMoveTab') {
                     setMode('select');
                 } else {
@@ -468,29 +375,18 @@
                 }
             });
         });
-
-        // --- モード設定関数 ---
+        
         function setMode(mode) {
             currentMode = mode;
-            isDrawing = false;
-            isSelecting = false;
-            isMoving = false;
-            isShapeMode = (mode === 'shape'); // 図形モードのフラグを更新
-
-            // ボタンの表示/非表示をリセット
             drawBtn.style.display = 'inline-block';
             eraseBtn.style.display = 'inline-block';
             selectBtn.style.display = 'inline-block';
-            shapeBtn.style.display = 'inline-block';
-            copyBtn.style.display = 'inline-block';
-            cutBtn.style.display = 'inline-block';
-            pasteBtn.style.display = 'inline-block';
             completeSelectionBtn.style.display = 'none';
             cancelSelectionBtn.style.display = 'none';
 
-            // 全てのボタンの背景色をリセット
-            document.querySelectorAll('#controls button').forEach(btn => btn.style.backgroundColor = '');
-
+            document.querySelectorAll('#drawTab button').forEach(btn => btn.style.backgroundColor = '');
+            document.querySelectorAll('#selectMoveTab button').forEach(btn => btn.style.backgroundColor = '');
+            
             if (mode === 'draw') {
                 drawBtn.style.backgroundColor = '#666';
             } else if (mode === 'erase') {
@@ -499,28 +395,13 @@
                 selectBtn.style.backgroundColor = '#666';
                 completeSelectionBtn.style.display = 'inline-block';
                 cancelSelectionBtn.style.display = 'inline-block';
-            } else if (mode === 'shape') { // ④ 図形モードのUIを制御
-                shapeBtn.style.backgroundColor = '#666';
-                // 描画タブの他のボタンを非表示にする
-                drawBtn.style.display = 'none';
-                eraseBtn.style.display = 'none';
             }
             
-            // ⑤ 図形コントロールの表示/非表示を制御
-            shapeControls.style.display = isShapeMode ? 'flex' : 'none';
-
             if (mode !== 'select' && mode !== 'move') {
                 clearSelection();
             }
-            
-            // 図形モードでない場合は、プレビューをクリア
-            if (!isShapeMode) {
-                shapePreviewVoxels = [];
-                updateGridColors();
-            }
         }
         
-        // --- 選択機能のロジック（既存） ---
         function clearSelection() {
             selectedCells = [];
             selectedVoxelData = [];
@@ -531,7 +412,7 @@
             cells.flat().forEach(cell => {
                 cell.classList.remove('selecting-cell');
             });
-            updateGridColors();
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
         }
         
         function getCellFromPoint(clientX, clientY) {
@@ -564,7 +445,6 @@
         });
         completeSelectionBtn.addEventListener('click', () => {
             if (isSelecting) {
-                // 選択範囲確定（移動モードへ移行）の処理
                 isSelecting = false;
                 const rect = selectionBox.getBoundingClientRect();
                 const gridRect = grid.getBoundingClientRect();
@@ -583,244 +463,20 @@
                         }
                     }
                 }
-                // 元のボクセルデータをクリアし、移動用ボックスを表示
                 selectedCells.forEach(cell => {
                     voxelData[currentLayer][cell.z][cell.x] = null;
                 });
-                updateGridColors();
+                updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
                 selectionBox.style.display = 'block';
                 selectionBox.classList.add('moving-box');
                 setMode('move');
                 return;
             }
             if (currentMode === 'move' && selectedCells.length > 0) {
-                // 移動確定の処理
                 clearSelection();
                 setMode('select');
             }
         });
-
-        // --- ③ コピー/カット/ペースト機能のロジック ---
-        function copySelection() {
-            if (selectedVoxelData.length === 0) {
-                alert('選択されたボクセルがありません。');
-                return;
-            }
-            clipboardData = JSON.parse(JSON.stringify(selectedVoxelData));
-            alert('選択範囲をコピーしました。');
-        }
-
-        function cutSelection() {
-            if (selectedVoxelData.length === 0) {
-                alert('選択されたボクセルがありません。');
-                return;
-            }
-            saveStateForUndo();
-            clipboardData = JSON.parse(JSON.stringify(selectedVoxelData));
-            
-            // 既存の選択ボクセルを消去
-            selectedCells.forEach(cell => {
-                voxelData[currentLayer][cell.z][cell.x] = null;
-            });
-            
-            clearSelection(); 
-            updateGridColors();
-            if (is3DInitialized) update3DView();
-            alert('選択範囲をカットしました。');
-        }
-
-        function pasteSelection() {
-            if (!clipboardData || clipboardData.length === 0) {
-                alert('クリップボードにデータがありません。');
-                return;
-            }
-            
-            saveStateForUndo();
-            clearSelection();
-            
-            // ペースト位置の計算は移動モードに任せるため、ここでは一旦中心を基準にする
-            let minX = Infinity, minZ = Infinity;
-            let maxX = -Infinity, maxZ = -Infinity;
-            clipboardData.forEach(v => {
-                minX = Math.min(minX, v.x);
-                minZ = Math.min(minZ, v.z);
-                maxX = Math.max(maxX, v.x);
-                maxZ = Math.max(maxZ, v.z);
-            });
-
-            const contentWidth = maxX - minX + 1;
-            const contentDepth = maxZ - minZ + 1;
-
-            const pasteOffsetX = Math.floor((width - contentWidth) / 2) - minX;
-            const pasteOffsetZ = Math.floor((depth - contentDepth) / 2) - minZ;
-
-            selectedVoxelData = JSON.parse(JSON.stringify(clipboardData));
-            selectedCells = [];
-            
-            selectedVoxelData.forEach(voxel => {
-                const newX = voxel.x + pasteOffsetX;
-                const newZ = voxel.z + pasteOffsetZ;
-                
-                if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                    selectedCells.push({ x: newX, z: newZ, color: voxel.color });
-                    // 移動前の処理と同じく、元のボクセルをnullにする
-                    voxelData[currentLayer][newZ][newX] = null; 
-                }
-            });
-
-            if (selectedCells.length > 0) {
-                // 選択ボックスの表示範囲を計算し、移動モードへ移行
-                const boxMinX = Math.min(...selectedCells.map(c => c.x));
-                const boxMaxX = Math.max(...selectedCells.map(c => c.x));
-                const boxMinZ = Math.min(...selectedCells.map(c => c.z));
-                const boxMaxZ = Math.max(...selectedCells.map(c => c.z));
-                
-                selectionBox.style.left = `${boxMinX * 20}px`;
-                selectionBox.style.top = `${boxMinZ * 20}px`;
-                selectionBox.style.width = `${(boxMaxX - boxMinX + 1) * 20}px`;
-                selectionBox.style.height = `${(boxMaxZ - boxMinZ + 1) * 20}px`;
-                selectionBox.style.display = 'block';
-                selectionBox.classList.add('moving-box');
-                
-                setMode('move'); 
-                updateGridColors();
-            }
-        }
-
-        copyBtn.addEventListener('click', copySelection);
-        cutBtn.addEventListener('click', cutSelection);
-        pasteBtn.addEventListener('click', pasteSelection);
-        
-        // --- ④⑤⑥ 図形描画ロジックとアルゴリズム ---
-
-        /**
-         * 点(px, pz)が三角形(v1, v2, v3)の内部にあるかを判定するヘルパー関数
-         */
-        function crossProduct(v1, v2, p) {
-            return (v2.x - v1.x) * (p.z - v1.z) - (v2.z - v1.z) * (p.x - v1.x);
-        }
-
-        function isInsideTriangle(px, pz, v1, v2, v3) {
-            const p = {x: px, z: pz};
-            const c1 = crossProduct(v1, v2, p);
-            const c2 = crossProduct(v2, v3, p);
-            const c3 = crossProduct(v3, v1, p);
-            
-            // すべての積が同じ符号である（境界を含む）
-            return (c1 >= 0 && c2 >= 0 && c3 >= 0) || (c1 <= 0 && c2 <= 0 && c3 <= 0);
-        }
-
-        /**
-         * 指定された図形のボクセル相対座標リストを生成する (x, zは中心からの相対座標)
-         * ⑥ 円や三角の自動補正に対応
-         */
-        function getShapeVoxels(type, size, rotation = 0) {
-            const voxels = [];
-            const r = Math.max(1, Math.floor(size / 2)); 
-
-            if (type === 'square') {
-                const half = r;
-                for (let x = -half; x <= half; x++) {
-                    for (let z = -half; z <= half; z++) {
-                        voxels.push({ x, z });
-                    }
-                }
-            } else if (type === 'circle') {
-                // 円: 塗りつぶし円の計算
-                for (let x = -r; x <= r; x++) {
-                    for (let z = -r; z <= r; z++) {
-                        if (x * x + z * z <= r * r) {
-                            voxels.push({ x, z });
-                        }
-                    }
-                }
-            } else if (type === 'triangle') {
-                // 三角形: 3頂点を計算し、内部を塗りつぶす
-                let v = [];
-                
-                if (rotation === 0) { v = [{x: 0, z: -r}, {x: r, z: r}, {x: -r, z: r}]; } 
-                else if (rotation === 90) { v = [{x: r, z: 0}, {x: -r, z: r}, {x: -r, z: -r}]; } 
-                else if (rotation === 180) { v = [{x: 0, z: r}, {x: -r, z: -r}, {x: r, z: -r}]; } 
-                else { v = [{x: -r, z: 0}, {x: r, z: -r}, {x: r, z: r}]; }
-
-                const minX = Math.min(v[0].x, v[1].x, v[2].x);
-                const maxX = Math.max(v[0].x, v[1].x, v[2].x);
-                const minZ = Math.min(v[0].z, v[1].z, v[2].z);
-                const maxZ = Math.max(v[0].z, v[1].z, v[2].z);
-
-                for (let x = minX; x <= maxX; x++) {
-                    for (let z = minZ; z <= maxZ; z++) {
-                        if (isInsideTriangle(x, z, v[0], v[1], v[2])) {
-                            voxels.push({ x, z });
-                        }
-                    }
-                }
-            }
-
-            return voxels;
-        }
-
-        shapeBtn.addEventListener('click', () => {
-            setMode('shape'); 
-            // 初期状態のサイズと回転をUIに反映
-            shapeSizeValue.textContent = currentShapeSize;
-            shapeRotate.style.display = (currentShapeType === 'triangle') ? 'inline-block' : 'none';
-            rotationLabel.style.display = (currentShapeType === 'triangle') ? 'block' : 'none';
-            shapeRotate.textContent = `回転: ${currentShapeRotation}°`;
-        });
-
-        shapeButtons.forEach(button => {
-            button.addEventListener('click', (e) => {
-                shapeButtons.forEach(btn => btn.classList.remove('active'));
-                e.target.classList.add('active');
-                currentShapeType = e.target.dataset.shape;
-                // 三角形の場合のみ回転ボタンを表示 (⑤に対応)
-                shapeRotate.style.display = (currentShapeType === 'triangle') ? 'inline-block' : 'none';
-                rotationLabel.style.display = (currentShapeType === 'triangle') ? 'block' : 'none';
-                currentShapeRotation = 0; // 図形が変わったら回転をリセット
-                shapeRotate.textContent = `回転: ${currentShapeRotation}°`;
-            });
-        });
-
-        shapeResizeP.addEventListener('click', () => { // ⑤ 拡大
-            currentShapeSize = Math.min(Math.max(width, depth), currentShapeSize + 2);
-            shapeSizeValue.textContent = currentShapeSize;
-        });
-
-        shapeResizeM.addEventListener('click', () => { // ⑤ 縮小
-            currentShapeSize = Math.max(3, currentShapeSize - 2);
-            shapeSizeValue.textContent = currentShapeSize;
-        });
-
-        shapeRotate.addEventListener('click', () => { // ⑤ 回転 (三角のみ)
-            if (currentShapeType !== 'triangle') return;
-            currentShapeRotation = (currentShapeRotation + 90) % 360;
-            shapeRotate.textContent = `回転: ${currentShapeRotation}°`;
-        });
-
-        finalizeShapeBtn.addEventListener('click', () => {
-            if (shapePreviewVoxels.length === 0) {
-                alert('配置する図形がありません。');
-                return;
-            }
-            saveStateForUndo();
-            // プレビューのボクセルを確定
-            shapePreviewVoxels.forEach(v => {
-                voxelData[currentLayer][v.z][v.x] = drawColor;
-            });
-            
-            // 図形モードを終了し、描画モードに戻る
-            setMode('draw');
-            updateGridColors();
-            if (is3DInitialized) update3DView();
-        });
-
-        cancelShapeBtn.addEventListener('click', () => {
-            setMode('draw'); // 図形モードをキャンセル
-        });
-        
-        // --- グリッドイベントリスナーの拡張（shapeModeの追加） ---
-
         grid.addEventListener('mousedown', (e) => {
             const cell = e.target.closest('.cell');
             if (!cell) return;
@@ -856,11 +512,8 @@
                     clearSelection();
                     setMode('select');
                 }
-            } else if (currentMode === 'shape') {
-                // 図形描画モードでは、クリックで決定する代わりに「決定」ボタンを使用
             }
         });
-
         grid.addEventListener('mousemove', (e) => {
             if (currentMode === 'draw' || currentMode === 'erase') {
                 if (!isDrawing) return;
@@ -899,29 +552,8 @@
                 const newZ = movingStartGridZ + dy;
                 selectionBox.style.left = `${newX * 20}px`;
                 selectionBox.style.top = `${newZ * 20}px`;
-            } else if (currentMode === 'shape') {
-                 // ④⑤ 図形プレビューの更新（マウスムーブ）
-                const cell = e.target.closest('.cell');
-                if (!cell) return;
-                const x = parseInt(cell.dataset.x);
-                const z = parseInt(cell.dataset.z);
-                
-                shapeBaseX = x;
-                shapeBaseZ = z;
-                shapePreviewVoxels = [];
-                
-                const shapeVoxels = getShapeVoxels(currentShapeType, currentShapeSize, currentShapeRotation);
-                shapeVoxels.forEach(v => {
-                    const newX = x + v.x;
-                    const newZ = z + v.z;
-                    if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                        shapePreviewVoxels.push({ x: newX, z: newZ });
-                    }
-                });
-                updateGridColors();
             }
         });
-
         window.addEventListener('mouseup', (e) => {
             isDrawing = false;
             if (currentMode === 'move' && isMoving) {
@@ -931,7 +563,6 @@
                 isMoving = false;
             }
         });
-
         grid.addEventListener('touchstart', (e) => {
             const cell = getCellFromPoint(e.touches[0].clientX, e.touches[0].clientY);
             if (!cell) return;
@@ -956,7 +587,6 @@
             } else if (currentMode === 'move') {
                 const cellIndex = selectedCells.findIndex(c => c.x === x && c.z === z);
                 if (cellIndex !== -1) {
-                    // ① 画像/選択範囲の場所移動（指スライド）に対応
                     isMoving = true;
                     saveStateForUndo();
                     movingStartMouseX = e.touches[0].clientX;
@@ -968,11 +598,8 @@
                     clearSelection();
                     setMode('select');
                 }
-            } else if (currentMode === 'shape') {
-                 // 図形描画モードでは、クリックで決定する代わりに「決定」ボタンを使用
             }
         }, { passive: false });
-
         grid.addEventListener('touchmove', (e) => {
             if (currentMode === 'draw' || currentMode === 'erase') {
                 if (!isDrawing) return;
@@ -1008,7 +635,6 @@
                     }
                 }
             } else if (currentMode === 'move' && isMoving) {
-                // ① 画像/選択範囲の場所移動（指スライド）に対応
                 e.preventDefault();
                 const touch = e.touches[0];
                 const dx = Math.round((touch.clientX - movingStartMouseX) / 20);
@@ -1017,31 +643,8 @@
                 const newZ = movingStartGridZ + dy;
                 selectionBox.style.left = `${newX * 20}px`;
                 selectionBox.style.top = `${newZ * 20}px`;
-            } else if (currentMode === 'shape') {
-                // ④⑤ 図形プレビューの更新（タッチムーブ）
-                e.preventDefault();
-                const touch = e.touches[0];
-                const cell = getCellFromPoint(touch.clientX, touch.clientY);
-                if (!cell) return;
-                const x = parseInt(cell.dataset.x);
-                const z = parseInt(cell.dataset.z);
-
-                shapeBaseX = x;
-                shapeBaseZ = z;
-                shapePreviewVoxels = [];
-                
-                const shapeVoxels = getShapeVoxels(currentShapeType, currentShapeSize, currentShapeRotation);
-                shapeVoxels.forEach(v => {
-                    const newX = x + v.x;
-                    const newZ = z + v.z;
-                    if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                        shapePreviewVoxels.push({ x: newX, z: newZ });
-                    }
-                });
-                updateGridColors();
             }
         }, { passive: false });
-
         window.addEventListener('touchend', (e) => {
             isDrawing = false;
             if (currentMode === 'move' && isMoving) {
@@ -1051,8 +654,6 @@
                 isMoving = false;
             }
         });
-        
-        // --- 既存のその他の関数（変更なし） ---
         function moveSelectedCells(dx, dy) {
             if (selectedVoxelData.length === 0) return;
             const newSelectedCells = [];
@@ -1060,14 +661,13 @@
                 const newX = movingStartGridX + voxel.x + dx;
                 const newZ = movingStartGridZ + voxel.z + dy;
                 
-                if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) 
-                {
+                if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
                     voxelData[currentLayer][newZ][newX] = voxel.color;
                     newSelectedCells.push({ x: newX, z: newZ });
                 }
             });
             selectedCells = newSelectedCells;
-            updateGridColors(); 
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
             if (is3DInitialized) update3DView();
         }
         function saveStateForUndo() {
@@ -1083,7 +683,7 @@
             if (undoStack.length === 0) return;
             voxelData = undoStack.pop();
             if (currentLayer >= height) currentLayer = height - 1;
-            updateGridColors();
+            updateGridColors(); // Fix: Use updateGridColors instead of renderGrid
             updateLayerLabel();
             if (is3DInitialized) update3DView();
         }
@@ -1123,6 +723,7 @@
             }
         }
         function updateGridColors() {
+            // Fix: Only update the colors of existing cells
             if (cells.length === 0) return;
             for (let z = 0; z < depth; z++) {
                 for (let x = 0; x < width; x++) {
@@ -1131,15 +732,6 @@
                     cell.style.backgroundColor = color ?? "transparent";
                     const isSelected = selectedCells.some(c => c.x === x && c.z === z);
                     cell.classList.toggle('selected-cell', isSelected);
-
-                    // ④⑤ 図形プレビューの表示
-                    const isShapePreview = shapePreviewVoxels.some(v => v.x === x && v.z === z);
-                    if (isShapePreview) {
-                         cell.style.backgroundColor = drawColor; // プレビューの色
-                         cell.style.opacity = '0.6'; // 半透明に
-                    } else {
-                         cell.style.opacity = '1.0';
-                    }
                 }
             }
         }
@@ -1162,7 +754,7 @@
                     }
                 }
             }
-            updateGridColors();
+            updateGridColors(); // Fix: Only update the grid, not rebuild it
             if (is3DInitialized && rendererContainer.style.display === 'block') {
                 update3DView();
             }
@@ -1294,12 +886,24 @@
                         const v101 = getVertexIndex(px + 1, py, pz + 1);
                         const v011 = getVertexIndex(px, py + 1, pz + 1);
                         const v111 = getVertexIndex(px + 1, py + 1, pz + 1);
-                        if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) { addFace(v011, v111, v110, v010, matName); }
-                        if (y === 0 || !voxelData[y - 1]?.[z]?.[x]) { addFace(v000, v100, v101, v001, matName); }
-                        if (x === width - 1 || !voxelData[y]?.[z]?.[x + 1]) { addFace(v100, v110, v111, v101, matName); }
-                        if (x === 0 || !voxelData[y]?.[z]?.[x - 1]) { addFace(v001, v011, v010, v000, matName); }
-                        if (z === depth - 1 || !voxelData[y]?.[z + 1]?.[x]) { addFace(v001, v101, v111, v011, matName); }
-                        if (z === 0 || !voxelData[y]?.[z - 1]?.[x]) { addFace(v100, v000, v010, v110, matName); }
+                        if (y === height - 1 || !voxelData[y + 1]?.[z]?.[x]) {
+                            addFace(v011, v111, v110, v010, matName);
+                        }
+                        if (y === 0 || !voxelData[y - 1]?.[z]?.[x]) {
+                            addFace(v000, v100, v101, v001, matName);
+                        }
+                        if (x === width - 1 || !voxelData[y]?.[z]?.[x + 1]) {
+                            addFace(v100, v110, v111, v101, matName);
+                        }
+                        if (x === 0 || !voxelData[y]?.[z]?.[x - 1]) {
+                            addFace(v001, v011, v010, v000, matName);
+                        }
+                        if (z === depth - 1 || !voxelData[y]?.[z + 1]?.[x]) {
+                            addFace(v001, v101, v111, v011, matName);
+                        }
+                        if (z === 0 || !voxelData[y]?.[z - 1]?.[x]) {
+                            addFace(v100, v000, v010, v110, matName);
+                        }
                     }
                 }
             }
@@ -1354,12 +958,15 @@
             if (isImageMoveMode) {
                 toggleMoveImageBtn.textContent = "画像移動モード: ON";
                 overlayImage.classList.add('moving');
-                // ① 指のスライドによる移動を可能にするために pointer-events を auto に
-                overlayImage.style.pointerEvents = 'auto'; 
+                overlayImage.style.zIndex = 25;
+                overlayImage.style.opacity = '1.0';
+                overlayImage.style.pointerEvents = 'auto';
                 overlayImage.style.cursor = 'move';
             } else {
                 toggleMoveImageBtn.textContent = "画像移動モード: OFF";
                 overlayImage.classList.remove('moving');
+                overlayImage.style.zIndex = 1;
+                overlayImage.style.opacity = '0.3';
                 overlayImage.style.pointerEvents = 'none';
                 overlayImage.style.cursor = 'default';
             }
@@ -1401,7 +1008,6 @@
                 dragging = false;
             }
         });
-        // ① 画像配置の場所移動（指スライド）に対応
         gridWrapper.addEventListener('touchstart', (e) => {
             if (!isImageMoveMode || !overlayImage) return;
             if (e.target !== overlayImage) return;
@@ -1413,7 +1019,7 @@
             imgStartTop = parseInt(overlayImage.style.top) || 0;
             e.preventDefault();
         }, { passive: false });
-        gridWrapper.addEventListener('touchmove', (e) => {
+        window.addEventListener('touchmove', (e) => {
             if (!dragging || !overlayImage) return;
             if (!isImageMoveMode) return;
             const touch = e.touches[0];
@@ -1429,223 +1035,267 @@
             overlayImage.style.top = newTop + "px";
             e.preventDefault();
         }, { passive: false });
-        window.addEventListener('touchend', (e) => {
-            if (dragging) {
-                dragging = false;
-            }
+        window.addEventListener('touchend', () => {
+            dragging = false;
         });
         function updateImagePositionAndLayer() {
-            if (overlayImage) {
-                // 画像の位置を調整するロジック...（ここでは省略。既存コードが持つロジックに任せる）
+            if (!overlayImage) return;
+            if (isImageMoveMode) {
+                overlayImage.style.zIndex = 10;
+                overlayImage.style.opacity = '1.0';
+                overlayImage.style.pointerEvents = 'auto';
+            } else {
+                overlayImage.style.zIndex = 1;
+                overlayImage.style.opacity = '0.3';
+                overlayImage.style.pointerEvents = 'none';
             }
         }
-        
-        // --- ★ 画像3D変換ロジックの修正・追加 ★ ---
-        
+        document.getElementById("resetBtn").addEventListener("click", () => {
+            if (confirm("本当にリセットする？未保存のデータは消えるよ？")) {
+                saveStateForUndo();
+                initData();
+                currentLayer = 0;
+                updateLayerLabel();
+                renderGrid();
+                if (is3DInitialized) update3DView();
+                if (overlayImage) {
+                    overlayImage.remove();
+                    overlayImage = null;
+                    isImageMoveMode = false;
+                    toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+                }
+            }
+        });
+        document.getElementById("colorPicker").addEventListener("input", e => {
+            drawColor = e.target.value;
+            isErasing = false;
+            setMode('draw');
+        });
+        document.getElementById("brushSize").addEventListener("input", e => {
+            brushSize = parseInt(e.target.value);
+            document.getElementById("brushSizeValue").textContent = brushSize;
+        });
+        document.getElementById("layerPrevBtn").addEventListener("click", () => {
+            if (currentLayer > 0) currentLayer--;
+            updateLayerLabel();
+            updateGridColors(); // Fix: Only update grid colors
+        });
+        document.getElementById("layerNextBtn").addEventListener("click", () => {
+            if (currentLayer < height - 1) currentLayer++;
+            updateLayerLabel();
+            updateGridColors(); // Fix: Only update grid colors
+        });
+        document.getElementById("resizeBtn").addEventListener("click", () => {
+            const newW = parseInt(document.getElementById("inputWidth").value);
+            const newH = parseInt(document.getElementById("inputHeight").value);
+            const newD = parseInt(document.getElementById("inputDepth").value);
+            if (newW > 0 && newH > 0 && newD > 0) {
+                saveStateForUndo();
+                resizeVoxelData(newW, newH, newD);
+                width = newW; height = newH; depth = newD;
+                if (currentLayer >= height) currentLayer = height - 1;
+                updateLayerLabel();
+                initGrid(); // Re-initialize the grid on resize
+                renderGrid(); // Call renderGrid to update
+                if (is3DInitialized) update3DView();
+            }
+        });
+        document.getElementById("copyLayerAddBtn").addEventListener("click", () => {
+            saveStateForUndo();
+            const copyLayer = voxelData[currentLayer].map(row => row.slice());
+            voxelData.splice(currentLayer + 1, 0, copyLayer);
+            height++;
+            if (currentLayer < height - 1) currentLayer++;
+            document.getElementById("inputHeight").value = height;
+            updateLayerLabel();
+            resizeVoxelData(width, height, depth); // Update voxelData structure
+            initGrid(); // Re-initialize grid on structural change
+            renderGrid();
+            if (is3DInitialized) update3DView();
+        });
+        document.getElementById("show2dBtn").addEventListener("click", () => {
+            rendererContainer.style.display = "none";
+            gridContainer.style.display = "block";
+        });
+        document.getElementById("show3dBtn").addEventListener("click", () => {
+            if (!is3DInitialized) {
+                init3DView();
+            }
+            rendererContainer.style.display = "block";
+            gridContainer.style.display = "none";
+            update3DView();
+        });
+        document.getElementById("saveJsonBtn").addEventListener("click", saveJSON);
+        document.getElementById("saveObjBtn").addEventListener("click", saveOBJ);
+        document.getElementById("undoBtn").addEventListener("click", undo);
+        document.getElementById("scrollUp").addEventListener("click", () => {
+            gridContainer.scrollBy(0, -50);
+        });
+        document.getElementById("scrollDown").addEventListener("click", () => {
+            gridContainer.scrollBy(0, 50);
+        });
+        document.getElementById("scrollLeft").addEventListener("click", () => {
+            gridContainer.scrollBy(-50, 0);
+        });
+        document.getElementById("scrollRight").addEventListener("click", () => {
+            gridContainer.scrollBy(50, 0);
+        });
+        document.getElementById("save3dImageBtn").addEventListener("click", () => {
+            if (!is3DInitialized) return;
+            renderer.render(scene, camera);
+            const dataURL = renderer.domElement.toDataURL("image/png");
+            const a = document.createElement("a");
+            a.href = dataURL;
+            a.download = `voxel_3dview.png`;
+            a.click();
+        });
+        const importJsonInput = document.getElementById('importJsonInput');
+        importJsonInput.addEventListener('change', e => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                try {
+                    const data = JSON.parse(reader.result);
+                    if (
+                        typeof data.width === 'number' &&
+                        typeof data.height === 'number' &&
+                        typeof data.depth === 'number' &&
+                        Array.isArray(data.voxelData)
+                    ) {
+                        width = data.width;
+                        height = data.height;
+                        depth = data.depth;
+                        voxelData = data.voxelData;
+                        document.getElementById("inputWidth").value = width;
+                        document.getElementById("inputHeight").value = height;
+                        document.getElementById("inputDepth").value = depth;
+                        currentLayer = 0;
+                        updateLayerLabel();
+                        initGrid(); // Fix: Initialize grid after loading new data
+                        updateGridColors(); // Fix: Update colors after init
+                        if (is3DInitialized) update3DView();
+                    } else {
+                        alert("不正なJSONデータです。");
+                    }
+                } catch (err) {
+                    alert("JSONの読み込みに失敗しました。");
+                    console.error(err);
+                }
+                importJsonInput.value = ""; // Fix: Clear the value after processing the file
+            };
+            reader.readAsText(file); // Fix: Add this line to read the file
+        });
+        function resizeVoxelData(newW, newH, newD) {
+            const newData = Array.from({ length: newH }, () =>
+                Array.from({ length: newD }, () =>
+                    Array.from({ length: newW }, () => null)
+                )
+            );
+            for (let y = 0; y < Math.min(height, newH); y++) {
+                for (let z = 0; z < Math.min(depth, newD); z++) {
+                    for (let x = 0; x < Math.min(width, newW); x++) {
+                        newData[y][z][x] = voxelData[y]?.[z]?.[x] || null;
+                    }
+                }
+            }
+            voxelData = newData;
+        }
         convertImageTo3dBtn.addEventListener('click', () => {
             if (!overlayImage) {
-                alert("画像を先にインポートしてください。");
+                alert("先に画像をインポートしてください。");
                 return;
             }
             sideSelectionDiv.style.display = 'block';
         });
-
         cancelBtn.addEventListener('click', () => {
             sideSelectionDiv.style.display = 'none';
         });
-
-        document.querySelectorAll('#sideSelection button[data-side]').forEach(button => {
-            button.addEventListener('click', (e) => {
-                const side = e.target.dataset.side;
-                convertImageTo3d(side);
-                
-                // 変換後はオーバーレイ画像を削除
-                if (overlayImage) {
-                    overlayImage.remove();
-                    overlayImage = null;
-                }
-                isImageMoveMode = false;
-                toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+        sideSelectionDiv.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON' && e.target.dataset.side) {
                 sideSelectionDiv.style.display = 'none';
-            });
+                convertImageTo3d(e.target.dataset.side);
+            }
         });
-
-        /**
-         * 画像を読み込み、指定された面に3Dボクセルデータとして変換・配置する
-         * @param {string} side - 配置する面 ('front', 'back', 'left', 'right', 'top', 'bottom')
-         */
         function convertImageTo3d(side) {
             if (!overlayImage) return;
-
             saveStateForUndo();
-
             const img = new Image();
-            img.crossOrigin = "Anonymous"; 
+            img.crossOrigin = 'Anonymous';
+            img.src = overlayImage.src;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d');
-                const imgW = img.naturalWidth;
-                const imgH = img.naturalHeight;
-
-                // 3Dモデルのサイズに合わせた解像度にスケーリング（グリッドの最大値に合わせる）
-                const maxDim = Math.max(width, height, depth);
-                canvas.width = maxDim;
-                canvas.height = maxDim; 
-                ctx.drawImage(img, 0, 0, maxDim, maxDim); // 正方形に引き伸ばして描画
-
-                const imageData = ctx.getImageData(0, 0, maxDim, maxDim);
-                const data = imageData.data;
-                
-                let dim1, dim2; // 3D空間の2次元（ボクセル数）
-                
-                // 面に応じて、ボクセルサイズを決定
+                let finalW, finalH;
+                const gridW = width;
+                const gridD = depth;
+                const gridH = height;
                 if (side === 'front' || side === 'back') {
-                    dim1 = width; // X軸
-                    dim2 = height; // Y軸
+                    finalW = gridW;
+                    finalH = gridH;
                 } else if (side === 'left' || side === 'right') {
-                    dim1 = depth; // Z軸
-                    dim2 = height; // Y軸
-                } else { // top, bottom
-                    dim1 = width; // X軸
-                    dim2 = depth; // Z軸
+                    finalW = gridD;
+                    finalH = gridH;
+                } else if (side === 'top' || side === 'bottom') {
+                    finalW = gridW;
+                    finalH = gridD;
                 }
-
-                // サンプリング間隔
-                const stepX = maxDim / dim1;
-                const stepY = maxDim / dim2;
-                
-                const pixelMap = [];
-
-                // ピクセルデータをグリッドサイズに合わせてサンプリング
-                for (let j = 0; j < dim2; j++) {
-                    for (let i = 0; i < dim1; i++) {
-                        // サンプリング座標（中央付近のピクセルを取得）
-                        const sampleX = Math.floor(i * stepX + stepX / 2);
-                        const sampleY = Math.floor(j * stepY + stepY / 2);
-
-                        const idx = (sampleY * maxDim + sampleX) * 4;
-                        const r = data[idx];
-                        const g = data[idx + 1];
-                        const b = data[idx + 2];
-                        const a = data[idx + 3];
-
-                        if (a > 127) { // 半透明以上をボクセルとして認識
-                            const hexColor = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
-                            pixelMap.push({ i, j, hexColor });
+                const imgRatio = img.width / img.height;
+                const gridRatio = finalW / finalH;
+                if (imgRatio > gridRatio) {
+                    finalH = finalW / imgRatio;
+                } else {
+                    finalW = finalH * imgRatio;
+                }
+                canvas.width = Math.round(finalW);
+                canvas.height = Math.round(finalH);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const data = imageData.data;
+                for (let y = 0; y < canvas.height; y++) {
+                    for (let x = 0; x < canvas.width; x++) {
+                        const index = (y * canvas.width + x) * 4;
+                        const r = data[index];
+                        const g = data[index + 1];
+                        const b = data[index + 2];
+                        const a = data[index + 3];
+                        if (a === 0) continue;
+                        let voxelX, voxelY, voxelZ;
+                        const hexColor = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+                        if (side === 'front') {
+                            voxelX = x;
+                            voxelY = height - 1 - (y);
+                            voxelZ = depth - 1;
+                        } else if (side === 'back') {
+                            voxelX = x;
+                            voxelY = height - 1 - (y);
+                            voxelZ = 0;
+                        } else if (side === 'left') {
+                            voxelX = 0;
+                            voxelY = height - 1 - (y);
+                            voxelZ = x;
+                        } else if (side === 'right') {
+                            voxelX = width - 1;
+                            voxelY = height - 1 - (y);
+                            voxelZ = x;
+                        } else if (side === 'top') {
+                            voxelX = x;
+                            voxelY = height - 1;
+                            voxelZ = y;
+                        } else if (side === 'bottom') {
+                            voxelX = x;
+                            voxelY = 0;
+                            voxelZ = y;
+                        }
+                        if (voxelX >= 0 && voxelX < width && voxelY >= 0 && voxelY < height && voxelZ >= 0 && voxelZ < depth) {
+                            voxelData[voxelY][voxelZ][voxelX] = hexColor;
                         }
                     }
                 }
-                
-                // 3Dデータへのマッピング
-                for (const { i, j, hexColor } of pixelMap) {
-                    let voxelX, voxelY, voxelZ;
-
-                    // i -> 1st dimension, j -> 2nd dimension
-                    if (side === 'front') {
-                        voxelX = i;
-                        voxelZ = depth - 1; 
-                    } else if (side === 'back') {
-                        voxelX = i;
-                        voxelZ = 0;
-                    } else if (side === 'left') {
-                        voxelX = 0;
-                        voxelZ = i; 
-                    } else if (side === 'right') {
-                        voxelX = width - 1;
-                        voxelZ = i;
-                    } else if (side === 'top' || side === 'bottom') {
-                        voxelX = i;
-                    }
-                    
-                    // Y軸の処理（上から下へ描画される画像を、下から上へ積むボクセルに反転させる）
-                    // front/back/left/right: jはY軸に対応
-                    // top/bottom: jはZ軸に対応
-                    if (side !== 'top' && side !== 'bottom') {
-                        voxelY = height - 1 - j;
-                    } else {
-                        // top/bottom の場合、jはZ軸に対応（手前がZ=depth-1, 奥がZ=0）
-                        voxelY = (side === 'top') ? height - 1 : 0;
-                        voxelZ = depth - 1 - j;
-                    }
-                    
-                    if (voxelX >= 0 && voxelX < width && voxelY >= 0 && voxelY < height && voxelZ >= 0 && voxelZ < depth) {
-                        // voxelDataのインデックスは [Y][Z][X]
-                        voxelData[voxelY][voxelZ][voxelX] = hexColor;
-                    }
-                }
-                
-                updateGridColors(); 
+                updateGridColors(); // Fix: Update grid colors after conversion
                 if (is3DInitialized) update3DView();
             };
-
-            // overlayImageのsrcから画像データを読み込む
-            img.src = overlayImage.src;
-        }
-
-        // --- 実行開始 ---
-        document.getElementById('brushSize').addEventListener('input', (e) => {
-            brushSize = parseInt(e.target.value);
-            document.getElementById('brushSizeValue').textContent = brushSize;
-        });
-        document.getElementById('colorPicker').addEventListener('change', (e) => {
-            drawColor = e.target.value;
-        });
-        document.getElementById('layerPrevBtn').addEventListener('click', () => {
-            if (currentLayer > 0) {
-                currentLayer--;
-                updateLayerLabel();
-                renderGrid();
-            }
-        });
-        document.getElementById('layerNextBtn').addEventListener('click', () => {
-            if (currentLayer < height - 1) {
-                currentLayer++;
-                updateLayerLabel();
-                renderGrid();
-            }
-        });
-        document.getElementById('resizeBtn').addEventListener('click', () => {
-            const newWidth = parseInt(document.getElementById('inputWidth').value);
-            const newHeight = parseInt(document.getElementById('inputHeight').value);
-            const newDepth = parseInt(document.getElementById('inputDepth').value);
-            if (newWidth > 0 && newHeight > 0 && newDepth > 0) {
-                width = newWidth;
-                height = newHeight;
-                depth = newDepth;
-                initData();
-                currentLayer = 0;
-                updateLayerLabel();
-                initGrid();
-                updateGridColors();
-                if (is3DInitialized) {
-                    update3DView();
-                }
-            }
-        });
-        document.getElementById('show2dBtn').addEventListener('click', () => {
-            rendererContainer.style.display = 'none';
-            gridContainer.style.display = 'block';
-            renderGrid();
-        });
-        document.getElementById('show3dBtn').addEventListener('click', () => {
-            gridContainer.style.display = 'none';
-            rendererContainer.style.display = 'block';
-            if (!is3DInitialized) {
-                init3DView();
-            } else {
-                update3DView();
-            }
-        });
-        document.getElementById('undoBtn').addEventListener('click', undo);
-        document.getElementById('resetBtn').addEventListener('click', () => {
-            if (confirm('全てのボクセルデータをリセットしますか？')) {
-                initData();
-                updateGridColors();
-                if (is3DInitialized) update3DView();
-            }
-        });
-        document.getElementById('saveJsonBtn').addEventListener('click', saveJSON);
-        document.getElementById('saveObjBtn').addEventListener('click', saveOBJ);
+        };
 
         initData();
         updateLayerLabel();
@@ -1659,7 +1309,6 @@
                 camera.updateProjectionMatrix();
             }
         });
-        
     </script>
 </body>
 </html>
