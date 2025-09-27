@@ -349,6 +349,7 @@
         let clipboard = []; // クリップボード用 (要望③)
         let currentShape = { type: 'none', x: -1, z: -1, size: 5, angle: 0 }; // 図形配置用 (要望④,⑤)
         let isShapeMoving = false; // 図形移動中フラグ (要望⑤)
+        let previousPreviewCells = []; // <--- FIX 1: 図形プレビューセルの保存用
 
         const grid = document.getElementById("grid");
         const layerLabel = document.getElementById("layerLabel");
@@ -417,7 +418,16 @@
                 // 図形コントロールをリセット
                 shapeControlsDiv.style.display = 'none';
                 currentShape.type = 'none';
-                cells.flat().forEach(c => c.classList.remove('selecting-cell', 'shape-preview-cell'));
+                // 図形プレビューのスタイルをリセット
+                previousPreviewCells.forEach(cell => {
+                    cell.classList.remove('shape-preview-cell');
+                    const x = parseInt(cell.dataset.x);
+                    const z = parseInt(cell.dataset.z);
+                    const color = voxelData[currentLayer][z]?.[x];
+                    cell.style.backgroundColor = color ?? "transparent";
+                });
+                previousPreviewCells = [];
+                cells.flat().forEach(c => c.classList.remove('selecting-cell'));
                 
                 if (button.dataset.tab === 'drawTab') {
                     setMode('draw');
@@ -541,7 +551,15 @@
 
         // 図形プレビューの描画 (要望⑤)
         function renderShapePreview() {
-            cells.flat().forEach(c => c.classList.remove('selecting-cell', 'shape-preview-cell'));
+            // <--- FIX 1: 前回のプレビューセルのスタイルをリセット
+            previousPreviewCells.forEach(cell => {
+                cell.classList.remove('shape-preview-cell');
+                const x = parseInt(cell.dataset.x);
+                const z = parseInt(cell.dataset.z);
+                const color = voxelData[currentLayer][z]?.[x];
+                cell.style.backgroundColor = color ?? "transparent"; // Voxel Dataの色に戻す
+            });
+            previousPreviewCells = [];
 
             if (currentShape.type === 'none') return;
             
@@ -550,9 +568,12 @@
                 if (v.x >= 0 && v.x < width && v.z >= 0 && v.z < depth) {
                     const cell = cells[v.z][v.x];
                     cell.classList.add('shape-preview-cell');
-                    cell.style.backgroundColor = currentShape.type !== 'none' ? drawColor : 'transparent';
+                    cell.style.backgroundColor = drawColor; // <--- FIX 1: 現在の描画色で一時的に上書き
+                    previousPreviewCells.push(cell);
                 }
             });
+            // 選択セルのハイライトを解除 (shapeとselectionの重複を避けるため)
+            cells.flat().forEach(c => c.classList.remove('selecting-cell')); 
         }
         
         // 図形配置モードへの切り替え (要望④)
@@ -590,7 +611,13 @@
             // 図形モード終了
             shapeControlsDiv.style.display = 'none';
             currentShape.type = 'none';
-            cells.flat().forEach(c => c.classList.remove('selecting-cell', 'shape-preview-cell'));
+            // <--- FIX 1: 最終的な後処理（スタイルリセットはrenderShapePreviewで完了済み）
+            previousPreviewCells.forEach(cell => {
+                cell.classList.remove('shape-preview-cell');
+                // この時点でvoxelDataが更新されているので、updateGridColorsが呼ばれればスタイルはクリアされる
+            });
+            previousPreviewCells = [];
+            cells.flat().forEach(c => c.classList.remove('selecting-cell'));
             setMode('draw');
         }
 
@@ -610,6 +637,22 @@
             setMode('erase');
         });
         cancelSelectionBtn.addEventListener('click', () => {
+            if (currentMode === 'move' && selectedVoxelData.length > 0) {
+                // 移動モード中にキャンセルされた場合、元の位置に戻す
+                const currentBoxX = parseInt(selectionBox.style.left) / 20;
+                const currentBoxZ = parseInt(selectionBox.style.top) / 20;
+
+                selectedVoxelData.forEach(voxel => {
+                    const originalX = currentBoxX + voxel.x;
+                    const originalZ = currentBoxZ + voxel.z;
+                    if (originalX >= 0 && originalX < width && originalZ >= 0 && originalZ < depth) {
+                        voxelData[currentLayer][originalZ][originalX] = voxel.color; // 元の場所に戻す（この処理はカット時のみ意味を持つ）
+                    }
+                });
+                
+                // 元の状態を復元するため、Undo
+                undo();
+            }
             clearSelection(true);
             setMode('select');
         });
@@ -650,6 +693,7 @@
 
         cutBtn.addEventListener('click', () => {
             if (currentMode === 'move' && selectedVoxelData.length > 0) {
+                saveStateForUndo(); // カット前の状態を保存
                 // 1. クリップボードにコピー
                 clipboard = JSON.parse(JSON.stringify(selectedVoxelData));
                 
@@ -665,61 +709,54 @@
                     }
                 });
 
-                // 3. 選択状態をクリア
-                updateGridColors();
-                clearSelection(true);
-                setMode('select');
-                console.log('カットしました');
+                // 3. 選択状態をクリアし、移動モードは維持
+                updateGridColors(); // 元の場所が消えたことを反映
+                // clearSelection(true); // 移動モードを維持するため、クリアしない
+                selectionBox.style.display = 'block';
+                selectionBox.classList.add('moving-box');
+                setMode('move');
+                console.log('カットしました。移動モードに移行');
             }
         });
 
         pasteBtn.addEventListener('click', () => {
             if (clipboard.length === 0) return;
             
-            // 既存の選択があればクリアし、ペーストしたものを新しい選択とする
+            // <--- FIX 2: 既存の選択があればクリアし、ペーストしたものを新しい選択とする
             clearSelection(true); 
 
-            saveStateForUndo();
-            
             const pasteX = Math.floor(width / 2); 
             const pasteZ = Math.floor(depth / 2);
             
-            // クリップボードの相対座標を絶対座標に変換してペースト
-            selectedVoxelData = [];
-            selectedCells = [];
-            
-            let minX = width, maxX = 0, minZ = depth, maxZ = 0;
+            // クリップボードの相対座標をselectedVoxelDataに設定 (voxelDataへの描画はしない)
+            selectedVoxelData = JSON.parse(JSON.stringify(clipboard));
+            selectedCells = []; // 最終的なセル位置はまだないのでクリアしておく
 
-            clipboard.forEach(voxel => {
-                const newX = voxel.x + pasteX;
-                const newZ = voxel.z + pasteZ;
-                
-                if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                    voxelData[currentLayer][newZ][newX] = voxel.color;
-                    selectedCells.push({ x: newX, z: newZ, color: voxel.color });
-                    selectedVoxelData.push(voxel); // クリップボードと同じ相対座標を維持
-                    
-                    minX = Math.min(minX, newX);
-                    maxX = Math.max(maxX, newX);
-                    minZ = Math.min(minZ, newZ);
-                    maxZ = Math.max(maxZ, newZ);
-                }
+            // バウンディングボックスの計算
+            let minRelX = width, maxRelX = 0, minRelZ = depth, maxRelZ = 0;
+            selectedVoxelData.forEach(voxel => {
+                minRelX = Math.min(minRelX, voxel.x);
+                maxRelX = Math.max(maxRelX, voxel.x);
+                minRelZ = Math.min(minRelZ, voxel.z);
+                maxRelZ = Math.max(maxRelZ, voxel.z);
             });
             
-            updateGridColors();
-            if (is3DInitialized) update3DView();
-            
-            // ペーストした領域を選択状態にして移動モードに移行
-            if (selectedCells.length > 0) {
-                selectionBox.style.left = `${minX * 20}px`;
-                selectionBox.style.top = `${minZ * 20}px`;
-                selectionBox.style.width = `${(maxX - minX + 1) * 20}px`;
-                selectionBox.style.height = `${(maxZ - minZ + 1) * 20}px`;
+            const startX = pasteX + minRelX;
+            const startZ = pasteZ + minRelZ;
+            const boxWidth = (maxRelX - minRelX + 1) * 20;
+            const boxHeight = (maxRelZ - minRelZ + 1) * 20;
+
+            // 描画はせず、移動用のボックスを設定
+            if (selectedVoxelData.length > 0) {
+                selectionBox.style.left = `${startX * 20}px`;
+                selectionBox.style.top = `${startZ * 20}px`;
+                selectionBox.style.width = `${boxWidth}px`;
+                selectionBox.style.height = `${boxHeight}px`;
                 selectionBox.style.display = 'block';
                 selectionBox.classList.add('moving-box');
 
                 setMode('move');
-                console.log('ペーストしました。移動モードに移行');
+                console.log('ペースト準備完了。移動モードに移行');
             }
         });
 
@@ -758,8 +795,9 @@
                 setMode('move');
                 return;
             }
-            if (currentMode === 'move' && selectedCells.length > 0) {
-                // 移動完了: moveSelectedCellsがmouseup/touchendで呼び出されるため、ここでは何もしなくて良い
+            if (currentMode === 'move' && selectedVoxelData.length > 0) {
+                // 移動完了を明示的に行う
+                moveSelectedCells(0, 0); // 移動量0で最終確定
                 clearSelection(true);
                 setMode('select');
             }
@@ -803,13 +841,17 @@
                     selectionBoxRect.top <= clientY && clientY <= selectionBoxRect.bottom) {
                     
                     isMoving = true;
-                    saveStateForUndo();
+                    // saveStateForUndo() は moveSelectedCells (mouse up) に移動 <-- FIX 2
                     movingStartMouseX = clientX;
                     movingStartMouseY = clientY;
                     movingStartGridX = parseInt(selectionBox.style.left) / 20;
                     movingStartGridZ = parseInt(selectionBox.style.top) / 20;
                     originalEvent.preventDefault();
                 } else {
+                    // ボックス外をクリックしたら移動を確定して新しい選択へ
+                    if (selectedVoxelData.length > 0) {
+                        moveSelectedCells(0, 0); // 現在位置で確定
+                    }
                     clearSelection(true);
                     setMode('select');
                 }
@@ -894,7 +936,7 @@
             if (currentMode === 'move' && isMoving) {
                 const dx = Math.round((e.clientX - movingStartMouseX) / 20);
                 const dy = Math.round((e.clientY - movingStartMouseY) / 20);
-                moveSelectedCells(dx, dy);
+                moveSelectedCells(dx, dy); // 最終確定
                 isMoving = false;
             } else if (currentMode === 'shape' && isShapeMoving) { // 図形移動の終了
                 isShapeMoving = false;
@@ -903,6 +945,9 @@
         
         function moveSelectedCells(dx, dy) {
             if (selectedVoxelData.length === 0) return;
+            
+            // <--- FIX 2: 最終確定時にUndoスタックに保存
+            saveStateForUndo(); 
             
             const currentBoxX = parseInt(selectionBox.style.left) / 20;
             const currentBoxZ = parseInt(selectionBox.style.top) / 20;
@@ -924,6 +969,11 @@
             selectedVoxelData = newSelectedVoxelData;
             updateGridColors();
             if (is3DInitialized) update3DView();
+            
+            // ボックスを非表示にしたい場合はここで clearSelection(true) を呼ぶ
+            // ここでは移動確定なので、このまま移動モードを維持しても良いが、Complete Selectionを押したのと同じ動きにする
+            clearSelection(true);
+            setMode('select');
         }
         
         // --- Voxelデータ操作のコア関数 ---
@@ -961,14 +1011,12 @@
                 for (let x = 0; x < width; x++) {
                     const cell = cells[z][x];
                     const color = voxelData[currentLayer][z]?.[x];
-                    cell.style.backgroundColor = color ?? "transparent";
+                    cell.style.backgroundColor = color ?? "transparent"; // Voxel Dataの色を優先
                     const isSelected = selectedCells.some(c => c.x === x && c.z === z);
                     cell.classList.toggle('selected-cell', isSelected);
                     
-                    // 図形配置モードのプレビューを最優先
-                    if (currentMode === 'shape' && cell.classList.contains('shape-preview-cell')) {
-                         cell.style.backgroundColor = drawColor;
-                    }
+                    // FIX 1: renderShapePreviewが直接スタイルを上書きするため、ここでは何もしない
+                    // 以前の図形プレビュー上書きロジックを削除
                 }
             }
         }
@@ -1382,7 +1430,12 @@
         document.getElementById('saveJsonBtn').addEventListener('click', saveJSON);
         document.getElementById('saveObjBtn').addEventListener('click', saveOBJ);
         document.getElementById('undoBtn').addEventListener('click', undo);
+        
         document.getElementById('resetBtn').addEventListener('click', () => {
+            // <--- FIX 3: リセット時の警告表示
+            if (!confirm("現在の作業内容をすべてリセットしてもよろしいですか？この操作は元に戻せません。")) {
+                return;
+            }
             saveStateForUndo();
             initData();
             updateGridColors();
