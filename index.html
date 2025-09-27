@@ -170,7 +170,8 @@
             background-color: #666;
         }
         #sideSelection {
-            display: none;
+            /* 修正: 初期状態で非表示 */
+            display: none; 
             position: fixed;
             top: 50%;
             left: 50%;
@@ -637,27 +638,30 @@
             saveStateForUndo();
             clearSelection();
             
-            const centerX = Math.floor(width / 2);
-            const centerZ = Math.floor(depth / 2);
-
+            // ペースト位置の計算は移動モードに任せるため、ここでは一旦中心を基準にする
             let minX = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxZ = -Infinity;
             clipboardData.forEach(v => {
                 minX = Math.min(minX, v.x);
                 minZ = Math.min(minZ, v.z);
+                maxX = Math.max(maxX, v.x);
+                maxZ = Math.max(maxZ, v.z);
             });
 
-            const pasteOffsetX = centerX - minX;
-            const pasteOffsetZ = centerZ - minZ;
+            const contentWidth = maxX - minX + 1;
+            const contentDepth = maxZ - minZ + 1;
 
-            selectedVoxelData = [];
+            const pasteOffsetX = Math.floor((width - contentWidth) / 2) - minX;
+            const pasteOffsetZ = Math.floor((depth - contentDepth) / 2) - minZ;
+
+            selectedVoxelData = JSON.parse(JSON.stringify(clipboardData));
             selectedCells = [];
             
-            clipboardData.forEach(voxel => {
+            selectedVoxelData.forEach(voxel => {
                 const newX = voxel.x + pasteOffsetX;
                 const newZ = voxel.z + pasteOffsetZ;
                 
                 if (newX >= 0 && newX < width && newZ >= 0 && newZ < depth) {
-                    selectedVoxelData.push(voxel); 
                     selectedCells.push({ x: newX, z: newZ, color: voxel.color });
                     // 移動前の処理と同じく、元のボクセルをnullにする
                     voxelData[currentLayer][newZ][newX] = null; 
@@ -1304,8 +1308,6 @@
                 obj += `usemtl ${matName}\n`;
                 obj += facesByMaterial[matName].join('\n') + '\n';
             }
-            zip.file("model.obj", obj);
-            zip.file("model.mtl", mtl);
             zip.generateAsync({ type: "blob" }).then(blob => {
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
@@ -1437,8 +1439,149 @@
                 // 画像の位置を調整するロジック...（ここでは省略。既存コードが持つロジックに任せる）
             }
         }
-        // 画像3D変換ロジック...（ここでは省略。既存コードが持つロジックに任せる）
         
+        // --- ★ 画像3D変換ロジックの修正・追加 ★ ---
+        
+        convertImageTo3dBtn.addEventListener('click', () => {
+            if (!overlayImage) {
+                alert("画像を先にインポートしてください。");
+                return;
+            }
+            sideSelectionDiv.style.display = 'block';
+        });
+
+        cancelBtn.addEventListener('click', () => {
+            sideSelectionDiv.style.display = 'none';
+        });
+
+        document.querySelectorAll('#sideSelection button[data-side]').forEach(button => {
+            button.addEventListener('click', (e) => {
+                const side = e.target.dataset.side;
+                convertImageTo3d(side);
+                
+                // 変換後はオーバーレイ画像を削除
+                if (overlayImage) {
+                    overlayImage.remove();
+                    overlayImage = null;
+                }
+                isImageMoveMode = false;
+                toggleMoveImageBtn.textContent = "画像移動モード: OFF";
+                sideSelectionDiv.style.display = 'none';
+            });
+        });
+
+        /**
+         * 画像を読み込み、指定された面に3Dボクセルデータとして変換・配置する
+         * @param {string} side - 配置する面 ('front', 'back', 'left', 'right', 'top', 'bottom')
+         */
+        function convertImageTo3d(side) {
+            if (!overlayImage) return;
+
+            saveStateForUndo();
+
+            const img = new Image();
+            img.crossOrigin = "Anonymous"; 
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                const imgW = img.naturalWidth;
+                const imgH = img.naturalHeight;
+
+                // 3Dモデルのサイズに合わせた解像度にスケーリング（グリッドの最大値に合わせる）
+                const maxDim = Math.max(width, height, depth);
+                canvas.width = maxDim;
+                canvas.height = maxDim; 
+                ctx.drawImage(img, 0, 0, maxDim, maxDim); // 正方形に引き伸ばして描画
+
+                const imageData = ctx.getImageData(0, 0, maxDim, maxDim);
+                const data = imageData.data;
+                
+                let dim1, dim2; // 3D空間の2次元（ボクセル数）
+                
+                // 面に応じて、ボクセルサイズを決定
+                if (side === 'front' || side === 'back') {
+                    dim1 = width; // X軸
+                    dim2 = height; // Y軸
+                } else if (side === 'left' || side === 'right') {
+                    dim1 = depth; // Z軸
+                    dim2 = height; // Y軸
+                } else { // top, bottom
+                    dim1 = width; // X軸
+                    dim2 = depth; // Z軸
+                }
+
+                // サンプリング間隔
+                const stepX = maxDim / dim1;
+                const stepY = maxDim / dim2;
+                
+                const pixelMap = [];
+
+                // ピクセルデータをグリッドサイズに合わせてサンプリング
+                for (let j = 0; j < dim2; j++) {
+                    for (let i = 0; i < dim1; i++) {
+                        // サンプリング座標（中央付近のピクセルを取得）
+                        const sampleX = Math.floor(i * stepX + stepX / 2);
+                        const sampleY = Math.floor(j * stepY + stepY / 2);
+
+                        const idx = (sampleY * maxDim + sampleX) * 4;
+                        const r = data[idx];
+                        const g = data[idx + 1];
+                        const b = data[idx + 2];
+                        const a = data[idx + 3];
+
+                        if (a > 127) { // 半透明以上をボクセルとして認識
+                            const hexColor = '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+                            pixelMap.push({ i, j, hexColor });
+                        }
+                    }
+                }
+                
+                // 3Dデータへのマッピング
+                for (const { i, j, hexColor } of pixelMap) {
+                    let voxelX, voxelY, voxelZ;
+
+                    // i -> 1st dimension, j -> 2nd dimension
+                    if (side === 'front') {
+                        voxelX = i;
+                        voxelZ = depth - 1; 
+                    } else if (side === 'back') {
+                        voxelX = i;
+                        voxelZ = 0;
+                    } else if (side === 'left') {
+                        voxelX = 0;
+                        voxelZ = i; 
+                    } else if (side === 'right') {
+                        voxelX = width - 1;
+                        voxelZ = i;
+                    } else if (side === 'top' || side === 'bottom') {
+                        voxelX = i;
+                    }
+                    
+                    // Y軸の処理（上から下へ描画される画像を、下から上へ積むボクセルに反転させる）
+                    // front/back/left/right: jはY軸に対応
+                    // top/bottom: jはZ軸に対応
+                    if (side !== 'top' && side !== 'bottom') {
+                        voxelY = height - 1 - j;
+                    } else {
+                        // top/bottom の場合、jはZ軸に対応（手前がZ=depth-1, 奥がZ=0）
+                        voxelY = (side === 'top') ? height - 1 : 0;
+                        voxelZ = depth - 1 - j;
+                    }
+                    
+                    if (voxelX >= 0 && voxelX < width && voxelY >= 0 && voxelY < height && voxelZ >= 0 && voxelZ < depth) {
+                        // voxelDataのインデックスは [Y][Z][X]
+                        voxelData[voxelY][voxelZ][voxelX] = hexColor;
+                    }
+                }
+                
+                updateGridColors(); 
+                if (is3DInitialized) update3DView();
+            };
+
+            // overlayImageのsrcから画像データを読み込む
+            img.src = overlayImage.src;
+        }
+
         // --- 実行開始 ---
         document.getElementById('brushSize').addEventListener('input', (e) => {
             brushSize = parseInt(e.target.value);
